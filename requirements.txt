@@ -1,0 +1,7 @@
+pymem
+pywin32
+pydirectinput
+requests
+pyperclip
+psutil
+PySide6
