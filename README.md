@@ -1,7 +1,7 @@
 # Funny Executor
 A Lightweight and simple roblox executor.
 
-UNC STATUS: UNKNOWN
+UNC STATUS: 6%
 
 SUNC STATUS: UNKNOWN
 
