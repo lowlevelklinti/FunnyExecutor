@@ -487,6 +487,31 @@ crypt = {}
 crypt.base64encode = base64encode
 crypt.base64decode = base64decode
 
+crypt.generatekey = function(len)
+	local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+	local key = ''
+	for i = 1, len or 32 do
+		local n = math.random(1, #alphabet)
+		key ..= alphabet:sub(n, n)
+	end
+	return key
+end
+
+crypt.generatebytes = crypt.generatekey
+crypt.random = crypt.generatekey
+
+crypt.encrypt = function(data, key)
+	data = tostring(data)
+	key = tostring(key)
+	local result = table.create(#data)
+	for i = 1, #data do
+		result[i] = string.char(bit32.bxor(string.byte(data, i), string.byte(key, (i - 1) % #key + 1)))
+	end
+	return table.concat(result), key
+end
+
+crypt.decrypt = crypt.encrypt
+
 -- lz4compress/lz4decompress
 
 lz4compress = lz4.compress
@@ -496,20 +521,51 @@ lz4decompress = lz4.decompress
 
 loadstring = function(source)
 	local response = send_method('compile', base64encode(source))
+	if not response or response:sub(1, 4) == 'fail' then
+		return nil, 'FunnyExecutor -- loadstring error: ' .. tostring(response)
+	end
 	return load_bytecode(base64decode(response), getfenv())
 end
 
 -- file api
 
+local blocked_extensions = {".exe", ".scr", ".bat", ".com", ".csh", ".msi", ".vb", ".vbs",
+	".vbe", ".ws", ".wsf", ".wsh", ".ps1", ".py", ".apk", ".pif", ".cpl", ".msc",
+	".jar", ".cmd", ".hta", ".gadget", ".inf", ".ins", ".isp", ".psd1", ".psm1",
+	".reg", ".scf", ".shb", ".sys", ".js", ".jse", ".lnk", ".msp",
+	".zip", ".rar", ".7z", ".tar", ".gz", ".cab", ".iso", ".img",
+	".dll", ".ocx", ".drv", ".vxd", ".xml", ".ini", ".cpp", ".c", ".url", ".uri",
+	".deb", ".rpm", ".sh", ".bash", ".zsh", ".fish", ".npm"}
+
+local function isBlockedExtension(path: string): boolean
+	-- windows strips trailing dots/spaces, so "file.exe " counts as ".exe"
+	local name = (path:lower():gsub("[%s.]+$", ""))
+	for _, ext in blocked_extensions do
+		if name:sub(-#ext) == ext then
+			return true
+		end
+	end
+	return false
+end
+
 writefile = function(path, content)
-	local response = send_method('writefile', path, content)
+	if isBlockedExtension(path) then
+		warn('FunnyExecutor -- writefile blocked: ' .. path)
+		return
+	end
+	-- content is base64'd in transit so newlines and binary bytes survive the bridge protocol
+	local response = send_method('writefile', path, base64encode(content))
 	if response ~= 'ok' then
 		warn('FunnyExecutor -- file error: '..tostring(response))
 	end
 end
 
 appendfile = function(path, content)
-	local response = send_method('appendfile', path, content)
+	if isBlockedExtension(path) then
+		warn('FunnyExecutor -- appendfile blocked: ' .. path)
+		return
+	end
+	local response = send_method('appendfile', path, base64encode(content))
 	if response ~= 'ok' then
 		warn('FunnyExecutor -- file error: '..tostring(response))
 	end
@@ -520,9 +576,8 @@ readfile = function(path)
 	if response == 'fail' then
 		warn('FunnyExecutor -- file error: '..tostring(response))
 		return nil
-	else
-		return response
 	end
+	return base64decode(response)
 end
 
 isfile = function(path)
@@ -565,13 +620,59 @@ end
 
 listfiles = function(path)
 	local response = send_method('listfiles', path)
+	if response == 'fail' then
+		warn('FunnyExecutor -- listfiles: folder not found: ' .. tostring(path))
+		return {}
+	end
+	if response == '' then
+		return {}
+	end
 	return response:split('\n')
+end
+
+-- loadfile
+
+loadfile = function(path: string)
+	local content = readfile(path)
+	if not content then
+		return nil, 'FunnyExecutor -- loadfile: unable to read \'' .. tostring(path) .. '\''
+	end
+
+	local ok, result = pcall(loadstring, content)
+	if not ok or result == nil then
+		return nil, 'FunnyExecutor -- loadfile: ' .. tostring(result)
+	end
+
+	return result
+end
+
+-- setfpscap
+
+setfpscap = function(fps: number)
+	if type(fps) ~= 'number' then
+		error('setfpscap expects a number', 2)
+	end
+
+	local response = send_method('setfpscap', tostring(math.floor(fps + 0.5)))
+	if response ~= 'ok' then
+		warn('FunnyExecutor -- setfpscap failed: ' .. tostring(fps))
+	end
+end
+
+getfpscap = function()
+	local response = send_method('getfpscap')
+	local cap = tonumber(response)
+	if not cap then
+		warn('FunnyExecutor -- getfpscap failed')
+		return nil
+	end
+	return cap
 end
 
 -- clipboard
 
 setclipboard = function(content)
-	local response = send_method('setclipboard', content)
+	local response = send_method('setclipboard', base64encode(tostring(content)))
 	if response ~= 'ok' then
 		warn('FunnyExecutor -- clipboard error: '..tostring(response))
 	end
@@ -587,7 +688,358 @@ toclipboard = setclipboard
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.100'
+	return 'FunnyExecutor', 'v0.110'
+end
+
+getexecutorname = function()
+	return identifyexecutor()
+end
+
+getexecutorversion = function()
+	return select(2, identifyexecutor())
+end
+
+-- executor env extensions
+
+local executor_closures = {}
+setmetatable(executor_closures, {__mode = 'k'})
+
+islclosure = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'islclosure' (function expected, got " .. type(func) .. ')', 2)
+	return debug.info(func, 's') ~= '[C]'
+end
+
+isluaclosure = islclosure
+
+iscclosure = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'iscclosure' (function expected, got " .. type(func) .. ')', 2)
+	return debug.info(func, 's') == '[C]'
+end
+
+newcclosure = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'newcclosure' (function expected, got " .. type(func) .. ')', 2)
+	local wrapped = coroutine.wrap(function(...)
+		while true do
+			coroutine.yield(func(...))
+		end
+	end)
+	executor_closures[wrapped] = true
+	return wrapped
+end
+
+clonefunction = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'clonefunction' (function expected, got " .. type(func) .. ')', 2)
+	if iscclosure(func) then
+		return newcclosure(func)
+	end
+	return function(...)
+		return func(...)
+	end
+end
+
+isexecutorclosure = function(func)
+	if type(func) ~= 'function' then
+		error("invalid argument #1 to 'isexecutorclosure' (function expected, got " .. type(func) .. ')', 2)
+	end
+
+	if executor_closures[func] then
+		return true
+	end
+
+	if iscclosure(func) then
+		return debug.info(func, 'n') == ''
+	end
+
+	local ok, fenv = pcall(getfenv, func)
+	if not ok then
+		return false
+	end
+
+	if typeof(fenv.script) ~= 'Instance' then
+		return true
+	end
+
+	if fenv.script.Name == 'AvatarEditorPrompts' or fenv.script.Name == 'JestGlobals' then
+		return false
+	end
+
+	if fenv.script.Parent == nil then
+		return true
+	end
+
+	if fenv == getfenv(0) then
+		return true
+	end
+
+	return true
+end
+
+checkclosure = isexecutorclosure
+isourclosure = isexecutorclosure
+
+-- cloneref / compareinstances
+
+local clonerefs = {}
+setmetatable(clonerefs, {__mode = 'k'})
+
+cloneref = function(obj)
+	local proxy = newproxy(true)
+	local meta = getmetatable(proxy)
+	meta.__index = function(t, n)
+		local v = obj[n]
+		if typeof(v) == 'function' then
+			return function(self, ...)
+				if self == t then
+					self = obj
+				end
+				return v(self, ...)
+			end
+		end
+		return v
+	end
+	meta.__newindex = function(_, n, v)
+		obj[n] = v
+	end
+	meta.__tostring = function()
+		return tostring(obj)
+	end
+	meta.__metatable = getmetatable(obj)
+	clonerefs[proxy] = obj
+	return proxy
+end
+
+compareinstances = function(a, b)
+	assert(type(a) == 'userdata', "invalid argument #1 to 'compareinstances' (Instance expected, got " .. typeof(a) .. ')', 2)
+	assert(type(b) == 'userdata', "invalid argument #2 to 'compareinstances' (Instance expected, got " .. typeof(b) .. ')', 2)
+	if clonerefs[a] then
+		a = clonerefs[a]
+	end
+	if clonerefs[b] then
+		b = clonerefs[b]
+	end
+	return a == b
+end
+
+-- report cloneref proxies as Instances (what sunc checks for)
+
+local rtypeof = typeof
+typeof = function(obj)
+	if clonerefs[obj] then
+		return 'Instance'
+	end
+	return rtypeof(obj)
+end
+
+-- getnamecallmethod (error-probe technique, ported from the reference env)
+
+local function generate_error(object)
+	local _, err = xpcall(function()
+		object:__namecall()
+	end, function()
+		return debug.info(2, 'f')
+	end)
+	return err
+end
+
+local first_probe = generate_error(OverlapParams.new())
+local second_probe = generate_error(Color3.new())
+
+local cached_methods = {}
+setmetatable(cached_methods, {__mode = 'k'})
+
+getnamecallmethod = function()
+	local method = nil
+
+	local _, err = pcall(first_probe)
+	if type(err) == 'string' then
+		method = err:match('^(.+) is not a valid member of %w+$')
+	end
+
+	if not method then
+		_, err = pcall(second_probe)
+		if type(err) == 'string' then
+			method = err:match('^(.+) is not a valid member of %w+$')
+		end
+	end
+
+	if not method or method == '__namecall' then
+		return cached_methods[coroutine.running()]
+	end
+
+	cached_methods[coroutine.running()] = method
+	return method
+end
+
+-- gethui (created lazily, only when first called)
+
+local hidden_ui = nil
+
+gethui = function()
+	if hidden_ui and hidden_ui.Parent then
+		return hidden_ui
+	end
+
+	local ok, gui = pcall(function()
+		local screen_gui = Instance.new('ScreenGui')
+		screen_gui.Name = 'RobloxUi'
+		screen_gui.ResetOnSpawn = false
+		screen_gui.DisplayOrder = 999999
+		screen_gui.Parent = game:GetService('CoreGui')
+		return screen_gui
+	end)
+
+	if ok then
+		hidden_ui = gui
+	end
+
+	return hidden_ui
+end
+
+-- instance registry
+-- tracks descendants via one signal connection + a lazy one-time scan on
+-- first use (deliberately NOT a proxy-per-instance system like the reference)
+
+local instance_registry = {}
+local registry_scanned = false
+
+local function register_instance(inst)
+	instance_registry[inst] = true
+end
+
+local function ensure_registry()
+	if registry_scanned then
+		return
+	end
+	registry_scanned = true
+
+	for _, inst in game_o:GetDescendants() do
+		register_instance(inst)
+	end
+end
+
+game_o.DescendantAdded:Connect(register_instance)
+
+getnilinstances = function()
+	ensure_registry()
+	local result = {}
+
+	for inst in instance_registry do
+		local ok, parent = pcall(function()
+			return inst.Parent
+		end)
+		if ok and parent == nil then
+			table.insert(result, inst)
+		end
+	end
+
+	return result
+end
+
+getloadedmodules = function()
+	ensure_registry()
+	local result = {}
+
+	for inst in instance_registry do
+		local ok, is_module = pcall(function()
+			return inst:IsA('ModuleScript')
+		end)
+		if ok and is_module then
+			table.insert(result, inst)
+		end
+	end
+
+	return result
+end
+
+getscripts = function()
+	ensure_registry()
+	local result = {}
+
+	for inst in instance_registry do
+		local ok, matches = pcall(function()
+			if inst:IsA('LocalScript') or inst:IsA('ModuleScript') then
+				return true
+			end
+			if inst:IsA('Script') then
+				local context = inst.RunContext
+				return context == Enum.RunContext.Client or context == Enum.RunContext.Legacy
+			end
+			return false
+		end)
+		if ok and matches then
+			table.insert(result, inst)
+		end
+	end
+
+	return result
+end
+
+getrunningscripts = function()
+	local result = {}
+
+	for _, inst in getscripts() do
+		local ok, matches = pcall(function()
+			local full_name = inst:GetFullName()
+			if full_name:find('CoreGui') or full_name:find('CorePackages') then
+				return false
+			end
+			return inst:FindFirstAncestorOfClass('Actor') == nil
+		end)
+		if ok and matches then
+			table.insert(result, inst)
+		end
+	end
+
+	return result
+end
+
+-- isreadonly
+
+isreadonly = function(tbl)
+	assert(type(tbl) == 'table', "invalid argument #1 to 'isreadonly' (table expected, got " .. type(tbl) .. ')', 2)
+	return table.isfrozen(tbl)
+end
+
+-- queue_on_teleport (file-backed: queued scripts run on next inject)
+
+local queue_file = 'queued_teleports.lua'
+local queue_marker = '\n--__FUNNYQUEUE__--\n'
+
+queue_on_teleport = function(source)
+	assert(type(source) == 'string', "invalid argument #1 to 'queue_on_teleport' (string expected, got " .. type(source) .. ')', 2)
+
+	local existing = ''
+	if isfile(queue_file) then
+		existing = readfile(queue_file) or ''
+	end
+
+	if existing == '' then
+		writefile(queue_file, source)
+	else
+		writefile(queue_file, existing .. queue_marker .. source)
+	end
+end
+
+local function flush_teleport_queue()
+	if not isfile(queue_file) then
+		return
+	end
+
+	local content = readfile(queue_file) or ''
+	delfile(queue_file)
+
+	for _, source in content:split(queue_marker) do
+		if source ~= '' then
+			task.spawn(function()
+				local func, err = loadstring(source)
+				if func then
+					func()
+				else
+					warn('FunnyExecutor -- queued script failed: ' .. tostring(err))
+				end
+			end)
+		end
+	end
 end
 
 -- isnetworkowner (my own idea)
@@ -625,6 +1077,11 @@ request = function(options)
 	return result
 end
 
+http_request = request
+syn = {
+	request = request
+}
+
 -- main loop
 
 game.StarterGui:SetCore("SendNotification", {
@@ -632,6 +1089,8 @@ game.StarterGui:SetCore("SendNotification", {
 	Text = "Attached",
 	Duration = 5,
 })
+
+flush_teleport_queue()
 
 task.spawn(function()
 	while task.wait() do

@@ -12,6 +12,7 @@ offsets = [
     "bytecode_ptr",
     "bytecode_size",
     "fflag_enable_load_module",
+    "fflag_task_scheduler_target_fps",
     "value",
     "string_length"
 ]

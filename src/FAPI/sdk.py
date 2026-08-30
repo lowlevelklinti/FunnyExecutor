@@ -30,6 +30,7 @@ class Roblox:
         if not self.version:
             raise SdkError("Cannot find version")
 
+        print('Roblox version:', self.version)
         offsets.check(self.version)
         self.offsets = offsets.get()
 
@@ -44,6 +45,19 @@ class Roblox:
             return classes[name](self, x.address)
         else:
             return x
+
+    def set_fps_cap(self, fps: int):
+        offset = self.offsets.fflag_task_scheduler_target_fps
+        if not offset:
+            raise SdkError('FPS cap fflag offset unavailable for this version')
+        addr = self.mem.base_address + offset
+        self.mem.write_int(addr, fps)
+
+    def get_fps_cap(self) -> int:
+        offset = self.offsets.fflag_task_scheduler_target_fps
+        if not offset:
+            raise SdkError('FPS cap fflag offset unavailable for this version')
+        return self.mem.read_int(self.mem.base_address + offset)
 
 class Instance:
     def __init__(self, rbx: Roblox, addr):

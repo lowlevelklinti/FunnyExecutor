@@ -53,7 +53,13 @@ class LuauHighlighter(QSyntaxHighlighter):
             'writefile', 'appendfile', 'readfile', 'isfile',
             'isfolder', 'delfile', 'delfolder', 'makefolder',
             'listfiles', 'setclipboard', 'getclipboard', 'messagebox',
-            'identifyexecutor', 'isnetworkowner'
+            'identifyexecutor', 'isnetworkowner', 'loadfile', 'setfpscap',
+            'getfpscap', 'getexecutorname', 'getexecutorversion', 'cloneref',
+            'compareinstances', 'islclosure', 'iscclosure', 'newcclosure',
+            'clonefunction', 'isexecutorclosure', 'checkclosure', 'gethui',
+            'getnilinstances', 'getloadedmodules', 'getscripts',
+            'getrunningscripts', 'isreadonly', 'queue_on_teleport',
+            'getnamecallmethod', 'http_request'
         ]
         for word in unc_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")

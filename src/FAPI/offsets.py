@@ -38,6 +38,7 @@ class Offsets:
         self.bytecode_ptr = data["bytecode_ptr"]
         self.bytecode_size = data["bytecode_size"]
         self.fflag_enable_load_module = data["fflag_enable_load_module"]
+        self.fflag_task_scheduler_target_fps = data.get("fflag_task_scheduler_target_fps")
         self.value = data["value"]
         self.string_length = data["string_length"]
 
@@ -49,6 +50,7 @@ def silent_exit():
     exit()
 
 def update(version):
+    print(f'Fetching offsets for {version} ...')
     offsets = requests.get(f"https://offsets.imtheo.lol/{version}/offsets.json")
     fflags = requests.get(f"https://offsets.imtheo.lol/{version}/fflags.json")
     try:
@@ -56,14 +58,21 @@ def update(version):
         jf = fflags.json()
 
         if 'error' in j or 'error' in jf:
-            raise VersionError("Version not found")
+            api_error = j.get('error') or jf.get('error')
+            raise VersionError(f"offsets.imtheo.lol has no offsets for {version} (API said: {api_error})")
 
         cache = {
+            "schema": 2,
             "roblox_version": version,
             "offsets": {
                 "fflag_enable_load_module": jf["FFlagOffsets"]["FFlags"]["EnableLoadModule"]
             }
         }
+
+        # optional, not every dump may carry it
+        fps_cap = jf["FFlagOffsets"]["FFlags"].get("TaskSchedulerTargetFps")
+        if fps_cap is not None:
+            cache["offsets"]["fflag_task_scheduler_target_fps"] = fps_cap
 
         for name, path in offsets_to_copy.items():
             value = j["Offsets"]
@@ -78,24 +87,28 @@ def update(version):
 
 def check(version):
     upd = False
+    print('Current Roblox version:', version)
 
     if os.path.exists(appdata / 'offset_cache.json'):
         with open(appdata / 'offset_cache.json', 'r') as f:
             j = json.loads(f.read())
-            if 'roblox_version' not in j:
+            print('Cached Roblox version:', j.get('roblox_version', '(none)'))
+            if 'schema' not in j or j['schema'] != 2:
                 upd = True
             elif j["roblox_version"] != version:
                 upd = True
     else:
+        print('No offset cache found')
         upd = True
 
     if upd:
         print("New version found. Updating!")
         try:
             update(version)
-        except VersionError:
+        except VersionError as e:
+            print(e)
             print("Your Roblox instance might have updated and offsets aren't supported yet.\n"
-                  "You might have to wait for an update from offsets.theo.com.\n"
+                  "You might have to wait for an update from offsets.imtheo.lol.\n"
                   "Please try again later.")
             silent_exit()
         except JSONError:

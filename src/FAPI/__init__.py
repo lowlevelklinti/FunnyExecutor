@@ -23,6 +23,7 @@ class Executor:
             raise ExecutionError('Roblox is not open')
 
         self.sdk: sdk.Roblox = rbx if rbx else get_sdk()
+        bridge.set_sdk(self.sdk)
         self.strval = None
 
     @property
