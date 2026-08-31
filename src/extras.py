@@ -59,7 +59,12 @@ class LuauHighlighter(QSyntaxHighlighter):
             'clonefunction', 'isexecutorclosure', 'checkclosure', 'gethui',
             'getnilinstances', 'getloadedmodules', 'getscripts',
             'getrunningscripts', 'isreadonly', 'queue_on_teleport',
-            'getnamecallmethod', 'http_request'
+            'getnamecallmethod', 'http_request', 'crypt', 'hash', 'messagebox',
+            'mouse1click', 'mouse2click', 'mouse1press', 'mouse1release',
+            'mouse2press', 'mouse2release', 'movemouse', 'mousemoveabs',
+            'mouserel', 'mousemoverel', 'getmousepos', 'getmouselocation',
+            'keyclick', 'keypress', 'keyrelease', 'iswindowactive', 'isrbxactive',
+            'getscriptbytecode', 'dumpstring', 'getscripthash'
         ]
         for word in unc_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")

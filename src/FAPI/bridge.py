@@ -1,4 +1,7 @@
 import base64
+import ctypes
+import ctypes.wintypes
+import hashlib
 import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler
@@ -8,6 +11,8 @@ import os
 from pathlib import Path
 from shutil import rmtree
 
+import pydirectinput
+import psutil
 import pyperclip
 from .compiler import Luau
 
@@ -32,6 +37,27 @@ blocked_extensions = {
 def is_blocked(path: Path) -> bool:
     return path.name.rstrip(' .').lower().endswith(tuple(blocked_extensions))
 
+input_handlers = {
+    'mouse1click': lambda a: pydirectinput.click(button='left'),
+    'mouse2click': lambda a: pydirectinput.click(button='right'),
+    'middleclick': lambda a: pydirectinput.click(button='middle'),
+    'mouse1down': lambda a: pydirectinput.mouseDown(button='left'),
+    'mouse1up': lambda a: pydirectinput.mouseUp(button='left'),
+    'mouse2down': lambda a: pydirectinput.mouseDown(button='right'),
+    'mouse2up': lambda a: pydirectinput.mouseUp(button='right'),
+    'middledown': lambda a: pydirectinput.mouseDown(button='middle'),
+    'middleup': lambda a: pydirectinput.mouseUp(button='middle'),
+    'movemouse': lambda a: pydirectinput.moveTo(int(a[0]), int(a[1])),
+    'mousemoveabs': lambda a: pydirectinput.moveTo(int(a[0]), int(a[1])),
+    'movemouserel': lambda a: pydirectinput.moveRel(int(a[0]), int(a[1])),
+    'mousemoverel': lambda a: pydirectinput.moveRel(int(a[0]), int(a[1])),
+    'keyclick': lambda a: pydirectinput.press(a[0].decode('utf-8')),
+    'keydown': lambda a: pydirectinput.keyDown(a[0].decode('utf-8')),
+    'keyup': lambda a: pydirectinput.keyUp(a[0].decode('utf-8')),
+    'keypress': lambda a: pydirectinput.keyDown(a[0].decode('utf-8')),
+    'keyrelease': lambda a: pydirectinput.keyUp(a[0].decode('utf-8')),
+}
+
 def recv_method(method, args):
     create_workspace()
 
@@ -47,6 +73,13 @@ def recv_method(method, args):
         return b''
 
     # non-file functions
+
+    if method in input_handlers:
+        try:
+            input_handlers[method](args)
+            return b'ok'
+        except Exception:
+            return b'fail'
 
     if method == 'setclipboard':
         try:
@@ -78,6 +111,68 @@ def recv_method(method, args):
         if value is None:
             return b'fail'
         return str(value).encode('ascii')
+
+    elif method == 'hash':
+        try:
+            data = base64.b64decode(args[1])
+        except Exception:
+            return b'fail'
+        algo = args[0].decode('ascii', 'replace').lower()
+        for candidate in (algo, algo.replace('-', ''), algo.replace('-', '_'), algo.replace('_', '')):
+            try:
+                return hashlib.new(candidate, data).hexdigest().encode('ascii')
+            except Exception:
+                continue
+        return b'fail'
+
+    elif method == 'messagebox':
+        try:
+            text = base64.b64decode(args[0]).decode('utf-8', 'replace')
+            title = base64.b64decode(args[1]).decode('utf-8', 'replace') if len(args) > 1 and args[1] else 'FunnyExecutor'
+            flags = int(args[2]) if len(args) > 2 and args[2].isdigit() else 0
+        except Exception:
+            return b'fail'
+        result = ctypes.windll.user32.MessageBoxW(None, text, title, flags)
+        return str(result).encode('ascii')
+
+    elif method == 'getmousepos':
+        try:
+            x, y = pydirectinput.position()
+            return f'{x},{y}'.encode('ascii')
+        except Exception:
+            return b'fail'
+
+    elif method == 'iswindowactive':
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            pid = ctypes.wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            name = psutil.Process(pid.value).name().lower()
+            return b'true' if name == 'robloxplayerbeta.exe' else b'false'
+        except Exception:
+            return b'fail'
+
+    elif method == 'getscriptbytecode':
+        if _sdk is None:
+            return b'fail'
+        try:
+            root = _sdk.datamodel.find('CoreGui', '_funnyexecutor')
+            holder = root.find_first_child(args[0].decode('utf-8'))
+            script = holder.value
+            return base64.b64encode(script.get_authentic_bytecode())
+        except Exception:
+            return b'fail'
+
+    elif method == 'getscripthash':
+        if _sdk is None:
+            return b'fail'
+        try:
+            root = _sdk.datamodel.find('CoreGui', '_funnyexecutor')
+            holder = root.find_first_child(args[0].decode('utf-8'))
+            script = holder.value
+            return hashlib.sha256(script.get_authentic_bytecode()).hexdigest().encode('ascii')
+        except Exception:
+            return b'fail'
 
     elif method == 'getinit':
         print('giving init')
@@ -190,7 +285,8 @@ _target_source = b'1234'
 PORT = 9475
 
 def start_bridge():
-    httpd = socketserver.TCPServer(("", PORT), Handler)
+    httpd = socketserver.ThreadingTCPServer(("", PORT), Handler)
+    httpd.daemon_threads = True
     Thread(target=httpd.serve_forever, daemon=True).start()
 
 def create_workspace():

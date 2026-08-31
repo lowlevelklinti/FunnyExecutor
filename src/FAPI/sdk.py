@@ -275,12 +275,21 @@ class BoolValue(Instance):
     def get_value(self):
         return self.memory.read_bool(self.address+self.offsets.value)
 
+class ObjectValue(Instance):
+    @property
+    def value(self):
+        ptr = self.memory.read_ulonglong(self.address + self.offsets.value)
+        if not ptr:
+            return None
+        return self._rbx.from_class_name(ptr)
+
 classes = {
     'Instance': Instance,
     "ModuleScript": Script,
     "LocalScript": Script,
     "StringValue": StringValue,
-    "BoolValue": BoolValue
+    "BoolValue": BoolValue,
+    "ObjectValue": ObjectValue
 }
 
 def get_hwnd(proc_handle):

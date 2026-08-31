@@ -512,6 +512,17 @@ end
 
 crypt.decrypt = crypt.encrypt
 
+crypt.hash = function(data, hash_name)
+	assert(type(data) == 'string', "invalid argument #1 to 'crypt.hash' (string expected, got " .. type(data) .. ')', 2)
+	assert(type(hash_name) == 'string', "invalid argument #2 to 'crypt.hash' (string expected, got " .. type(hash_name) .. ')', 2)
+
+	local response = send_method('hash', hash_name, base64encode(data))
+	if response == 'fail' then
+		return nil
+	end
+	return response
+end
+
 -- lz4compress/lz4decompress
 
 lz4compress = lz4.compress
@@ -669,6 +680,40 @@ getfpscap = function()
 	return cap
 end
 
+local function pointer_request(method_name, script)
+	local holder = Instance.new('ObjectValue')
+	holder.Name = http:GenerateGUID(false)
+	holder.Value = script
+	holder.Parent = folder
+
+	local response = send_method(method_name, holder.Name)
+	holder:Destroy()
+
+	return response
+end
+
+getscriptbytecode = function(script)
+	assert(typeof(script) == 'Instance' and script:IsA('LuaSourceContainer'), "invalid argument #1 to 'getscriptbytecode' (LuaSourceContainer expected, got " .. typeof(script) .. ')', 2)
+
+	local response = pointer_request('getscriptbytecode', script)
+	if not response or response == 'fail' then
+		return nil
+	end
+	return base64decode(response)
+end
+
+dumpstring = getscriptbytecode
+
+getscripthash = function(script)
+	assert(typeof(script) == 'Instance' and script:IsA('LuaSourceContainer'), "invalid argument #1 to 'getscripthash' (LuaSourceContainer expected, got " .. typeof(script) .. ')', 2)
+
+	local response = pointer_request('getscripthash', script)
+	if not response or response == 'fail' then
+		return nil
+	end
+	return response
+end
+
 -- clipboard
 
 setclipboard = function(content)
@@ -685,10 +730,60 @@ end
 
 toclipboard = setclipboard
 
+local input_methods = {
+	mouse1click = 'mouse1click',
+	mouse2click = 'mouse2click',
+	middleclick = 'middleclick',
+	mouse1press = 'mouse1down',
+	mouse1release = 'mouse1up',
+	mouse2press = 'mouse2down',
+	mouse2release = 'mouse2up',
+	middlepress = 'middledown',
+	middlerelease = 'middleup',
+	movemouse = 'movemouse',
+	mousemoveabs = 'mousemoveabs',
+	mouserel = 'movemouserel',
+	mousemoverel = 'movemouserel',
+	keyclick = 'keyclick',
+	keypress = 'keypress',
+	keyrelease = 'keyrelease',
+}
+
+for name, method in input_methods do
+	_G[name] = function(...)
+		local response = send_method(method, ...)
+		if response == 'fail' then
+			warn('FunnyExecutor -- input error: ' .. name)
+		end
+	end
+end
+
+getmousepos = function()
+	local response = send_method('getmousepos')
+	local x, y = response:match('^(%-?%d+),(%-?%d+)$')
+	if not x then
+		return nil, nil
+	end
+	return tonumber(x), tonumber(y)
+end
+
+getmouselocation = getmousepos
+
+iswindowactive = function()
+	return send_method('iswindowactive') == 'true'
+end
+
+isrbxactive = iswindowactive
+
+messagebox = function(text, title, flags)
+	local response = send_method('messagebox', base64encode(tostring(text)), base64encode(tostring(title or 'FunnyExecutor')), tostring(flags or 0))
+	return tonumber(response)
+end
+
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.110'
+	return 'FunnyExecutor', 'v0.120'
 end
 
 getexecutorname = function()
