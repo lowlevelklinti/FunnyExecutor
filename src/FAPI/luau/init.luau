@@ -846,7 +846,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.220'
+	return 'FunnyExecutor', 'v0.230'
 end
 
 getexecutorname = function()
@@ -1042,6 +1042,7 @@ gethui = function()
 		screen_gui.Name = 'RobloxUi'
 		screen_gui.ResetOnSpawn = false
 		screen_gui.DisplayOrder = 999999
+		screen_gui.IgnoreGuiInset = true
 		screen_gui.Parent = game:GetService('CoreGui')
 		return screen_gui
 	end)
@@ -1051,6 +1052,406 @@ gethui = function()
 	end
 
 	return hidden_ui
+end
+
+local drawing_objects = setmetatable({}, {__mode = 'k'})
+
+local function safe_font(name)
+	local ok, font = pcall(function()
+		return Enum.Font[name]
+	end)
+	if ok and font then
+		return font
+	end
+	return Enum.Font.SourceSans
+end
+
+local draw_fonts = {
+	[0] = safe_font('SourceSans'),
+	[1] = safe_font('SourceSansBold'),
+	[2] = safe_font('Plex'),
+	[3] = safe_font('Code'),
+}
+
+local function resolve_font(font)
+	if type(font) == 'number' then
+		return draw_fonts[font] or Enum.Font.SourceSans
+	elseif type(font) == 'string' then
+		local ok, resolved = pcall(function()
+			return Enum.Font[font]
+		end)
+		if ok and resolved then
+			return resolved
+		end
+		return Enum.Font.SourceSans
+	end
+	return font or Enum.Font.SourceSans
+end
+
+local function draw_alpha(transparency)
+	return math.clamp(1 - transparency, 0, 1)
+end
+
+local function style_line_frame(frame, state)
+	frame.BorderSizePixel = 0
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.BackgroundColor3 = state.Color
+	frame.BackgroundTransparency = draw_alpha(state.Transparency)
+	frame.ZIndex = state.ZIndex
+	frame.Visible = state.Visible
+end
+
+local function place_line_frame(frame, from, to, thickness)
+	local delta = to - from
+	local length = delta.Magnitude
+	frame.Position = UDim2.fromOffset((from.X + to.X) / 2, (from.Y + to.Y) / 2)
+	frame.Size = UDim2.fromOffset(length, thickness)
+	frame.Rotation = math.deg(math.atan(delta.Y, delta.X))
+end
+
+local function place_edge_frame(frame, p1, p2, opposite)
+	local delta = p2 - p1
+	local length = delta.Magnitude
+	local nx, ny = -delta.Y, delta.X
+	local nlen = math.sqrt(nx * nx + ny * ny)
+	if nlen == 0 then
+		frame.Visible = false
+		return
+	end
+	local ux, uy = nx / nlen, ny / nlen
+	local mid = (p1 + p2) / 2
+	local rel = opposite - mid
+	local dist = rel.X * ux + rel.Y * uy
+	frame.Position = UDim2.fromOffset(mid.X + ux * dist / 2, mid.Y + uy * dist / 2)
+	frame.Size = UDim2.fromOffset(length, math.abs(dist))
+	frame.Rotation = math.deg(math.atan(delta.Y, delta.X))
+end
+
+local function draw_defaults(class)
+	local state = {
+		Visible = false,
+		Color = Color3.new(1, 1, 1),
+		Transparency = 1,
+		ZIndex = 0,
+	}
+	if class == 'Line' then
+		state.From = Vector2.zero
+		state.To = Vector2.zero
+		state.Thickness = 1
+	elseif class == 'Square' then
+		state.Position = Vector2.zero
+		state.Size = Vector2.zero
+		state.Thickness = 1
+		state.Filled = false
+	elseif class == 'Circle' then
+		state.Position = Vector2.zero
+		state.Radius = 0
+		state.Thickness = 1
+		state.Filled = false
+		state.NumSides = 30
+	elseif class == 'Text' then
+		state.Text = ''
+		state.Size = 13
+		state.Center = false
+		state.Outline = false
+		state.OutlineColor = Color3.new(0, 0, 0)
+		state.Position = Vector2.zero
+		state.Font = 0
+	elseif class == 'Image' then
+		state.Url = ''
+		state.Data = ''
+		state.Position = Vector2.zero
+		state.Size = Vector2.zero
+		state.Rounding = 0
+	elseif class == 'Triangle' then
+		state.PointA = Vector2.zero
+		state.PointB = Vector2.zero
+		state.PointC = Vector2.zero
+		state.Thickness = 1
+		state.Filled = false
+	elseif class == 'Quad' then
+		state.PointA = Vector2.zero
+		state.PointB = Vector2.zero
+		state.PointC = Vector2.zero
+		state.PointD = Vector2.zero
+		state.Thickness = 1
+		state.Filled = false
+	end
+	return state
+end
+
+local draw_builders = {}
+
+draw_builders.Line = function(entry)
+	local frame = Instance.new('Frame')
+	frame.Visible = false
+	frame.Parent = gethui()
+	table.insert(entry.instances, frame)
+
+	entry.apply = function()
+		local state = entry.state
+		style_line_frame(frame, state)
+		place_line_frame(frame, state.From, state.To, state.Thickness)
+	end
+end
+
+draw_builders.Square = function(entry)
+	local frame = Instance.new('Frame')
+	frame.Visible = false
+	local stroke = Instance.new('UIStroke')
+	stroke.Enabled = false
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = frame
+	frame.Parent = gethui()
+	table.insert(entry.instances, frame)
+
+	entry.apply = function()
+		local state = entry.state
+		frame.BackgroundColor3 = state.Color
+		frame.Position = UDim2.fromOffset(state.Position.X, state.Position.Y)
+		frame.Size = UDim2.fromOffset(state.Size.X, state.Size.Y)
+		frame.ZIndex = state.ZIndex
+		frame.Visible = state.Visible
+		if state.Filled then
+			frame.BackgroundTransparency = draw_alpha(state.Transparency)
+			stroke.Enabled = false
+		else
+			frame.BackgroundTransparency = 1
+			stroke.Enabled = true
+			stroke.Color = state.Color
+			stroke.Thickness = state.Thickness
+			stroke.Transparency = draw_alpha(state.Transparency)
+		end
+	end
+end
+
+draw_builders.Circle = function(entry)
+	local frame = Instance.new('Frame')
+	frame.Visible = false
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	local corner = Instance.new('UICorner')
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = frame
+	local stroke = Instance.new('UIStroke')
+	stroke.Enabled = false
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = frame
+	frame.Parent = gethui()
+	table.insert(entry.instances, frame)
+
+	entry.apply = function()
+		local state = entry.state
+		frame.BackgroundColor3 = state.Color
+		frame.Position = UDim2.fromOffset(state.Position.X, state.Position.Y)
+		frame.Size = UDim2.fromOffset(state.Radius * 2, state.Radius * 2)
+		frame.ZIndex = state.ZIndex
+		frame.Visible = state.Visible
+		if state.Filled then
+			frame.BackgroundTransparency = draw_alpha(state.Transparency)
+			stroke.Enabled = false
+		else
+			frame.BackgroundTransparency = 1
+			stroke.Enabled = true
+			stroke.Color = state.Color
+			stroke.Thickness = state.Thickness
+			stroke.Transparency = draw_alpha(state.Transparency)
+		end
+	end
+end
+
+draw_builders.Text = function(entry)
+	local label = Instance.new('TextLabel')
+	label.Visible = false
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.AutomaticSize = Enum.AutomaticSize.XY
+	label.Size = UDim2.new(0, 0, 0, 0)
+	local stroke = Instance.new('UIStroke')
+	stroke.Enabled = false
+	stroke.Thickness = 2
+	stroke.Parent = label
+	label.Parent = gethui()
+	table.insert(entry.instances, label)
+
+	entry.apply = function()
+		local state = entry.state
+		label.Text = state.Text
+		label.TextColor3 = state.Color
+		label.TextTransparency = draw_alpha(state.Transparency)
+		label.TextSize = state.Size
+		label.Font = resolve_font(state.Font)
+		label.AnchorPoint = Vector2.new(state.Center and 0.5 or 0, state.Center and 0.5 or 0)
+		label.Position = UDim2.fromOffset(state.Position.X, state.Position.Y)
+		label.ZIndex = state.ZIndex
+		label.Visible = state.Visible
+		stroke.Enabled = state.Outline
+		stroke.Color = state.OutlineColor
+	end
+end
+
+draw_builders.Image = function(entry)
+	local image = Instance.new('ImageLabel')
+	image.Visible = false
+	image.BackgroundTransparency = 1
+	image.Parent = gethui()
+	table.insert(entry.instances, image)
+
+	entry.apply = function()
+		local state = entry.state
+		image.Image = state.Url ~= '' and state.Url or state.Data
+		image.ImageColor3 = state.Color
+		image.ImageTransparency = draw_alpha(state.Transparency)
+		image.Position = UDim2.fromOffset(state.Position.X, state.Position.Y)
+		image.Size = UDim2.fromOffset(state.Size.X, state.Size.Y)
+		image.ZIndex = state.ZIndex
+		image.Visible = state.Visible
+	end
+end
+
+local function build_polygon(entry, points)
+	for _ = 1, #points * 2 do
+		local frame = Instance.new('Frame')
+		frame.Visible = false
+		frame.Parent = gethui()
+		table.insert(entry.instances, frame)
+	end
+
+	entry.apply = function()
+		local state = entry.state
+		local n = #points
+
+		for _, inst in entry.instances do
+			inst.Visible = false
+		end
+
+		if state.Filled then
+			for i = 1, n do
+				local a = state[points[i]]
+				local b = state[points[i % n + 1]]
+				local c = state[points[(i + 1) % n + 1]]
+				local frame = entry.instances[n + i]
+				style_line_frame(frame, state)
+				place_edge_frame(frame, a, b, c)
+			end
+		else
+			for i = 1, n do
+				local a = state[points[i]]
+				local b = state[points[i % n + 1]]
+				local frame = entry.instances[i]
+				style_line_frame(frame, state)
+				place_line_frame(frame, a, b, state.Thickness)
+			end
+		end
+	end
+end
+
+draw_builders.Triangle = function(entry)
+	build_polygon(entry, {'PointA', 'PointB', 'PointC'})
+end
+
+draw_builders.Quad = function(entry)
+	build_polygon(entry, {'PointA', 'PointB', 'PointC', 'PointD'})
+end
+
+Drawing = {}
+
+function Drawing.new(class, properties)
+	assert(type(class) == 'string', "invalid argument #1 to 'Drawing.new' (string expected, got " .. type(class) .. ')', 2)
+	local builder = draw_builders[class]
+	assert(builder, "invalid argument #1 to 'Drawing.new' (Line, Text, Image, Square, Quad, Circle or Triangle expected, got '" .. tostring(class) .. "')", 2)
+
+	local entry = {
+		class = class,
+		state = draw_defaults(class),
+		instances = {},
+	}
+
+	builder(entry)
+	entry.apply()
+
+	local proxy = newproxy(true)
+	local meta = getmetatable(proxy)
+
+	meta.__index = function(_, key)
+		if key == 'Remove' or key == 'Destroy' then
+			return entry.remove
+		end
+		if entry.state[key] ~= nil then
+			return entry.state[key]
+		end
+		if key == 'TextBounds' and class == 'Text' then
+			return entry.instances[1].TextBounds
+		end
+		error(tostring(key) .. ' is not a valid member of Drawing (' .. class .. ')', 2)
+	end
+
+	meta.__newindex = function(_, key, value)
+		assert(entry.state[key] ~= nil, tostring(key) .. ' is not a valid member of Drawing (' .. class .. ')', 2)
+		entry.state[key] = value
+		entry.apply()
+	end
+
+	meta.__tostring = function()
+		return 'Drawing (' .. class .. ')'
+	end
+
+	entry.remove = function()
+		for _, inst in entry.instances do
+			pcall(function()
+				inst:Destroy()
+			end)
+		end
+		entry.instances = {}
+		drawing_objects[proxy] = nil
+	end
+
+	drawing_objects[proxy] = entry
+
+	if type(properties) == 'table' then
+		for key, value in properties do
+			proxy[key] = value
+		end
+	end
+
+	return proxy
+end
+
+Drawing.Fonts = {
+	UI = 0,
+	System = 1,
+	Plex = 2,
+	Monospace = 3,
+}
+
+isrenderobj = function(object)
+	return drawing_objects[object] ~= nil
+end
+
+cleardrawcache = function()
+	for proxy in drawing_objects do
+		local entry = drawing_objects[proxy]
+		if entry then
+			entry.remove()
+		end
+	end
+end
+
+isrenderavailable = function()
+	return true
+end
+
+getrenderproperty = function(drawing, property)
+	local entry = drawing_objects[drawing]
+	assert(entry, "invalid argument #1 to 'getrenderproperty' (Drawing expected)", 2)
+	assert(type(property) == 'string', "invalid argument #2 to 'getrenderproperty' (string expected, got " .. type(property) .. ')', 2)
+	return drawing[property]
+end
+
+setrenderproperty = function(drawing, property, value)
+	local entry = drawing_objects[drawing]
+	assert(entry, "invalid argument #1 to 'setrenderproperty' (Drawing expected)", 2)
+	assert(type(property) == 'string', "invalid argument #2 to 'setrenderproperty' (string expected, got " .. type(property) .. ')', 2)
+	drawing[property] = value
 end
 
 -- instance registry
