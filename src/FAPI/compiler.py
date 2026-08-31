@@ -1,26 +1,33 @@
-import subprocess, tempfile
+import os
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 parent = Path(__file__).resolve().parent
 
-# created a separate py file for this only so i can use it in the bridge
-
 class Luau:
     @staticmethod
     def compile(source: str | bytes):
-        path = tempfile.gettempdir()+'\\FunnyExecutor-Temp-Source.luau'
+        path = tempfile.gettempdir() + f'\\FunnyExecutor-Temp-Source-{os.getpid()}-{time.time_ns()}.luau'
 
-        if type(source) == str:
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(source)
-        else:
-            with open(path, 'wb') as f:
-                f.write(source)
+        try:
+            if type(source) == str:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(source)
+            else:
+                with open(path, 'wb') as f:
+                    f.write(source)
 
-        result = subprocess.run(
-            [parent/'luau'/'compile.exe', path, '--binary'],
-            capture_output=True,
-            check=True
-        )
+            result = subprocess.run(
+                [parent/'luau'/'compile.exe', path, '--binary'],
+                capture_output=True,
+                check=True
+            )
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
         return result.stdout

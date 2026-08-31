@@ -453,34 +453,97 @@ table.freeze(game)
 
 -- base64encode/base64decode
 
+local b64_alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local b64_bytes = {string.byte(b64_alphabet, 1, #b64_alphabet)}
+
 function base64encode(data)
-	local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	return ((data:gsub('.', function(x)
-		local r,b='',x:byte()
-		for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
-		return r;
-	end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
-		if (#x < 6) then return '' end
-		local c=0
-		for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
-		return b:sub(c+1,c+1)
-	end)..({ '', '==', '=' })[#data%3+1])
+	local out = table.create(math.ceil(#data / 3) * 4)
+	local n = 0
+
+	for i = 1, #data - 2, 3 do
+		local chunk = string.byte(data, i) * 65536 + string.byte(data, i + 1) * 256 + string.byte(data, i + 2)
+		n += 1
+		out[n] = string.char(
+			b64_bytes[bit32.rshift(chunk, 18) + 1],
+			b64_bytes[bit32.band(bit32.rshift(chunk, 12), 63) + 1],
+			b64_bytes[bit32.band(bit32.rshift(chunk, 6), 63) + 1],
+			b64_bytes[bit32.band(chunk, 63) + 1]
+		)
+	end
+
+	local rest = #data % 3
+	if rest == 1 then
+		local chunk = string.byte(data, #data)
+		n += 1
+		out[n] = string.char(
+			b64_bytes[bit32.rshift(chunk, 2) + 1],
+			b64_bytes[bit32.band(bit32.lshift(chunk, 4), 63) + 1],
+			61, 61
+		)
+	elseif rest == 2 then
+		local chunk = string.byte(data, #data - 1) * 256 + string.byte(data, #data)
+		n += 1
+		out[n] = string.char(
+			b64_bytes[bit32.rshift(chunk, 10) + 1],
+			b64_bytes[bit32.band(bit32.rshift(chunk, 4), 63) + 1],
+			b64_bytes[bit32.band(bit32.lshift(chunk, 2), 63) + 1],
+			61
+		)
+	end
+
+	return table.concat(out)
 end
 
 function base64decode(data)
-    local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-    data = string.gsub(data, '[^'..b..'=]', '')
-    return (data:gsub('.', function(x)
-        if (x == '=') then return '' end
-        local r,f='',(b:find(x)-1)
-        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
-        return r;
-    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
-        if (#x ~= 8) then return '' end
-        local c=0
-        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
-        return string.char(c)
-    end))
+	local lookup = {}
+	data = string.gsub(data, '[^' .. b64_alphabet .. '=]', '')
+
+	for i = 1, #b64_alphabet do
+		lookup[string.byte(b64_alphabet, i)] = i - 1
+	end
+
+	local padding = 0
+	while string.byte(data, #data - padding) == 61 do
+		padding += 1
+	end
+
+	local stripped = #data - padding
+	local out = table.create(stripped // 4 * 3 + 3)
+	local n = 0
+
+	for i = 1, stripped - 3, 4 do
+		local chunk = lookup[string.byte(data, i)] * 262144
+			+ lookup[string.byte(data, i + 1)] * 4096
+			+ lookup[string.byte(data, i + 2)] * 64
+			+ lookup[string.byte(data, i + 3)]
+		n += 1
+		out[n] = string.char(
+			bit32.band(bit32.rshift(chunk, 16), 255),
+			bit32.band(bit32.rshift(chunk, 8), 255),
+			bit32.band(chunk, 255)
+		)
+	end
+
+	local rest = stripped % 4
+	if rest == 2 then
+		local i = stripped - 1
+		local c1 = lookup[string.byte(data, i)]
+		local c2 = lookup[string.byte(data, i + 1)]
+		n += 1
+		out[n] = string.char(bit32.band(bit32.lshift(c1, 2) + bit32.rshift(c2, 4), 255))
+	elseif rest == 3 then
+		local i = stripped - 2
+		local c1 = lookup[string.byte(data, i)]
+		local c2 = lookup[string.byte(data, i + 1)]
+		local c3 = lookup[string.byte(data, i + 2)]
+		n += 1
+		out[n] = string.char(
+			bit32.band(bit32.lshift(c1, 2) + bit32.rshift(c2, 4), 255),
+			bit32.bor(bit32.band(bit32.lshift(c2, 4), 255), bit32.rshift(c3, 2))
+		)
+	end
+
+	return table.concat(out)
 end
 
 crypt = {}
@@ -783,7 +846,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.120'
+	return 'FunnyExecutor', 'v0.220'
 end
 
 getexecutorname = function()
@@ -1194,7 +1257,12 @@ task.spawn(function()
 			task.spawn(function()
 				local data = requestData()
 				if data then
-					load_bytecode(base64decode(data), getfenv())()
+					local ok, err = pcall(function()
+						load_bytecode(data, getfenv())()
+					end)
+					if not ok then
+						warn('FunnyExecutor -- execution error: ' .. tostring(err))
+					end
 				end
 			end)
 		end

@@ -1,5 +1,3 @@
-import base64
-
 import pymem
 from . import sdk, bridge
 from .compiler import Luau
@@ -106,7 +104,7 @@ class Executor:
 
         upd: sdk.BoolValue = root.find_first_child('UpdateIndicator')
 
-        bridge.set_source(base64.b64encode(Luau.compile(source)))
+        bridge.set_source(Luau.compile(source))
         upd.set_value(not upd.get_value())
 
         print("Executed")
