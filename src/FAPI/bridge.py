@@ -180,6 +180,12 @@ def recv_method(method, args):
             source = f.read()
         return base64.b64encode(Luau.compile(source))
 
+    elif method == 'getinitraw':
+        # raw bytecode for the fiu bootstrap (getinit stays base64 for legacy init.bin)
+        with open(old_parent / 'luau' / 'init.luau', 'rb') as f:
+            source = f.read()
+        return Luau.compile(source)
+
     # file api
 
     if not path:

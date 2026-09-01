@@ -2,7 +2,6 @@ import json
 import os.path
 import shutil
 import sys
-import webbrowser
 
 from design import Ui_MainWindow
 
@@ -11,8 +10,6 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from extras import CodeEditor, MessageBox
 
 import FAPI
-import requests
-import ctypes
 
 executor: FAPI.Executor | None = None
 sdk: FAPI.sdk.Roblox | None = None
@@ -120,10 +117,6 @@ class Window(QMainWindow, Ui_MainWindow):
             if self.tabWidget.count() == 0:
                 self._tab_number = 1
                 self._add_tab("Script #1")
-
-        def load_script(fn):
-            with open('scripts\\'+fn+'.lua', 'r', encoding='utf-8') as f:
-                self.tabWidget.setCurrentIndex(new_tab(content=f.read()))
 
         def ontop():
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.actionTop_Most.isChecked())

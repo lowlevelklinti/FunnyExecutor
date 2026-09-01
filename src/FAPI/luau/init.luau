@@ -1,24 +1,3 @@
---[[
-
-UNC functions:
-
-getgenv
-game:HttpGet
-base64encode, base64decode (also in crypt)
-lz4compress, lz4decompress
-loadstring
-file apis
-clipboard getter/setter
-identifyexecutor
-request
-
-isnetworkowner
-
-using fiu by rce-incorporated
-luau version 0.654
-
-]]
-
 -- create root
 
 local folder = Instance.new("Folder")
@@ -431,14 +410,21 @@ game = {
 }
 game.HttpGetAsync = game.HttpGet
 
+local game_wrappers = {}
+
 setmetatable(game, {
 	__index = function(_, key)
 		local value = game_o[key]
 
 		if type(value) == "function" then
-			return function(_, ...)
-				return value(game_o, ...)
+			local cached = game_wrappers[key]
+			if not cached then
+				cached = function(_, ...)
+					return value(game_o, ...)
+				end
+				game_wrappers[key] = cached
 			end
+			return cached
 		end
 
 		return value
@@ -454,96 +440,95 @@ table.freeze(game)
 -- base64encode/base64decode
 
 local b64_alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-local b64_bytes = {string.byte(b64_alphabet, 1, #b64_alphabet)}
+local b64_codes = {string.byte(b64_alphabet, 1, 64)}
+
+local b64_lookup = {}
+for i = 1, #b64_alphabet do
+	b64_lookup[string.byte(b64_alphabet, i)] = i - 1
+end
 
 function base64encode(data)
-	local out = table.create(math.ceil(#data / 3) * 4)
-	local n = 0
-
-	for i = 1, #data - 2, 3 do
-		local chunk = string.byte(data, i) * 65536 + string.byte(data, i + 1) * 256 + string.byte(data, i + 2)
-		n += 1
-		out[n] = string.char(
-			b64_bytes[bit32.rshift(chunk, 18) + 1],
-			b64_bytes[bit32.band(bit32.rshift(chunk, 12), 63) + 1],
-			b64_bytes[bit32.band(bit32.rshift(chunk, 6), 63) + 1],
-			b64_bytes[bit32.band(chunk, 63) + 1]
-		)
+	local len = #data
+	if len == 0 then
+		return ''
 	end
 
-	local rest = #data % 3
+	local src = buffer.fromstring(data)
+	local out = buffer.create(math.ceil(len / 3) * 4)
+	local o = 0
+
+	local i = 1
+	while i + 2 <= len do
+		local n = buffer.readu8(src, i - 1) * 65536 + buffer.readu8(src, i) * 256 + buffer.readu8(src, i + 1)
+		buffer.writeu8(out, o, b64_codes[bit32.rshift(n, 18) + 1])
+		buffer.writeu8(out, o + 1, b64_codes[bit32.band(bit32.rshift(n, 12), 63) + 1])
+		buffer.writeu8(out, o + 2, b64_codes[bit32.band(bit32.rshift(n, 6), 63) + 1])
+		buffer.writeu8(out, o + 3, b64_codes[bit32.band(n, 63) + 1])
+		o += 4
+		i += 3
+	end
+
+	local rest = len - i + 1
 	if rest == 1 then
-		local chunk = string.byte(data, #data)
-		n += 1
-		out[n] = string.char(
-			b64_bytes[bit32.rshift(chunk, 2) + 1],
-			b64_bytes[bit32.band(bit32.lshift(chunk, 4), 63) + 1],
-			61, 61
-		)
+		local n = buffer.readu8(src, i - 1)
+		buffer.writeu8(out, o, b64_codes[bit32.rshift(n, 2) + 1])
+		buffer.writeu8(out, o + 1, b64_codes[bit32.band(bit32.lshift(n, 4), 63) + 1])
+		buffer.writeu8(out, o + 2, 61)
+		buffer.writeu8(out, o + 3, 61)
 	elseif rest == 2 then
-		local chunk = string.byte(data, #data - 1) * 256 + string.byte(data, #data)
-		n += 1
-		out[n] = string.char(
-			b64_bytes[bit32.rshift(chunk, 10) + 1],
-			b64_bytes[bit32.band(bit32.rshift(chunk, 4), 63) + 1],
-			b64_bytes[bit32.band(bit32.lshift(chunk, 2), 63) + 1],
-			61
-		)
+		local n = buffer.readu8(src, i - 1) * 256 + buffer.readu8(src, i)
+		buffer.writeu8(out, o, b64_codes[bit32.rshift(n, 10) + 1])
+		buffer.writeu8(out, o + 1, b64_codes[bit32.band(bit32.rshift(n, 4), 63) + 1])
+		buffer.writeu8(out, o + 2, b64_codes[bit32.band(bit32.lshift(n, 2), 63) + 1])
+		buffer.writeu8(out, o + 3, 61)
 	end
 
-	return table.concat(out)
+	return buffer.tostring(out)
 end
 
 function base64decode(data)
-	local lookup = {}
-	data = string.gsub(data, '[^' .. b64_alphabet .. '=]', '')
-
-	for i = 1, #b64_alphabet do
-		lookup[string.byte(b64_alphabet, i)] = i - 1
+	local len = #data
+	if len == 0 then
+		return ''
 	end
 
 	local padding = 0
-	while string.byte(data, #data - padding) == 61 do
+	while padding < 2 and string.byte(data, len - padding) == 61 do
 		padding += 1
 	end
 
-	local stripped = #data - padding
-	local out = table.create(stripped // 4 * 3 + 3)
-	local n = 0
+	local stripped = len - padding
+	local tail = stripped % 4
+	local out = buffer.create(stripped // 4 * 3 + (tail == 2 and 1 or tail == 3 and 2 or 0))
+	local o = 0
 
-	for i = 1, stripped - 3, 4 do
-		local chunk = lookup[string.byte(data, i)] * 262144
-			+ lookup[string.byte(data, i + 1)] * 4096
-			+ lookup[string.byte(data, i + 2)] * 64
-			+ lookup[string.byte(data, i + 3)]
-		n += 1
-		out[n] = string.char(
-			bit32.band(bit32.rshift(chunk, 16), 255),
-			bit32.band(bit32.rshift(chunk, 8), 255),
-			bit32.band(chunk, 255)
-		)
+	local src = buffer.fromstring(data)
+	local i = 0
+	while i + 4 <= stripped do
+		local a = b64_lookup[buffer.readu8(src, i)] or 0
+		local b = b64_lookup[buffer.readu8(src, i + 1)] or 0
+		local c = b64_lookup[buffer.readu8(src, i + 2)] or 0
+		local d = b64_lookup[buffer.readu8(src, i + 3)] or 0
+		buffer.writeu8(out, o, bit32.band(bit32.lshift(a, 2) + bit32.rshift(b, 4), 255))
+		buffer.writeu8(out, o + 1, bit32.band(bit32.lshift(b, 4) + bit32.rshift(c, 2), 255))
+		buffer.writeu8(out, o + 2, bit32.band(bit32.lshift(c, 6) + d, 255))
+		o += 3
+		i += 4
 	end
 
-	local rest = stripped % 4
-	if rest == 2 then
-		local i = stripped - 1
-		local c1 = lookup[string.byte(data, i)]
-		local c2 = lookup[string.byte(data, i + 1)]
-		n += 1
-		out[n] = string.char(bit32.band(bit32.lshift(c1, 2) + bit32.rshift(c2, 4), 255))
-	elseif rest == 3 then
-		local i = stripped - 2
-		local c1 = lookup[string.byte(data, i)]
-		local c2 = lookup[string.byte(data, i + 1)]
-		local c3 = lookup[string.byte(data, i + 2)]
-		n += 1
-		out[n] = string.char(
-			bit32.band(bit32.lshift(c1, 2) + bit32.rshift(c2, 4), 255),
-			bit32.bor(bit32.band(bit32.lshift(c2, 4), 255), bit32.rshift(c3, 2))
-		)
+	if tail == 2 then
+		local a = b64_lookup[buffer.readu8(src, i)] or 0
+		local b = b64_lookup[buffer.readu8(src, i + 1)] or 0
+		buffer.writeu8(out, o, bit32.band(bit32.lshift(a, 2) + bit32.rshift(b, 4), 255))
+	elseif tail == 3 then
+		local a = b64_lookup[buffer.readu8(src, i)] or 0
+		local b = b64_lookup[buffer.readu8(src, i + 1)] or 0
+		local c = b64_lookup[buffer.readu8(src, i + 2)] or 0
+		buffer.writeu8(out, o, bit32.band(bit32.lshift(a, 2) + bit32.rshift(b, 4), 255))
+		buffer.writeu8(out, o + 1, bit32.band(bit32.lshift(b, 4) + bit32.rshift(c, 2), 255))
 	end
 
-	return table.concat(out)
+	return buffer.tostring(out)
 end
 
 crypt = {}
@@ -551,13 +536,12 @@ crypt.base64encode = base64encode
 crypt.base64decode = base64decode
 
 crypt.generatekey = function(len)
-	local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	local key = ''
-	for i = 1, len or 32 do
-		local n = math.random(1, #alphabet)
-		key ..= alphabet:sub(n, n)
+	len = len or 32
+	local bytes = table.create(len)
+	for i = 1, len do
+		bytes[i] = math.random(0, 255)
 	end
-	return key
+	return base64encode(string.char(table.unpack(bytes, 1, len)))
 end
 
 crypt.generatebytes = crypt.generatekey
@@ -846,7 +830,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.230'
+	return 'FunnyExecutor', 'v0.330'
 end
 
 getexecutorname = function()
@@ -1005,7 +989,19 @@ local second_probe = generate_error(Color3.new())
 local cached_methods = {}
 setmetatable(cached_methods, {__mode = 'k'})
 
+local bootstrap_getnamecallmethod = getnamecallmethod
+
 getnamecallmethod = function()
+	local thread = coroutine.running()
+
+	-- set by the bootstrap's namecall handler (reliable for any __namecall proxy)
+	if bootstrap_getnamecallmethod then
+		local registered = bootstrap_getnamecallmethod()
+		if registered then
+			return registered
+		end
+	end
+
 	local method = nil
 
 	local _, err = pcall(first_probe)
@@ -1515,17 +1511,10 @@ getscripts = function()
 	local result = {}
 
 	for inst in instance_registry do
-		local ok, matches = pcall(function()
-			if inst:IsA('LocalScript') or inst:IsA('ModuleScript') then
-				return true
-			end
-			if inst:IsA('Script') then
-				local context = inst.RunContext
-				return context == Enum.RunContext.Client or context == Enum.RunContext.Legacy
-			end
-			return false
+		local ok, is_script = pcall(function()
+			return inst:IsA('LocalScript') or inst:IsA('ModuleScript')
 		end)
-		if ok and matches then
+		if ok and is_script then
 			table.insert(result, inst)
 		end
 	end
