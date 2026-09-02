@@ -36,11 +36,10 @@ local bit32_rshift = bit32.rshift
 local bit32_lshift = bit32.lshift
 local bit32_extract = bit32.extract
 
---// FunnyExecutor patch: cooperative yielding (yields when a 5ms budget is exceeded, checked every 512 instructions)
 local os_clock = os.clock
 local task_wait = task.wait
-local yieldCheckInterval = 512
-local defaultYieldBudget = 0.005
+local yieldCheckInterval = 2048
+local defaultYieldBudget = 0.025
 
 local ttisnumber = function(v) return type(v) == "number" end
 local ttisstring = function(v) return type(v) == "string" end
