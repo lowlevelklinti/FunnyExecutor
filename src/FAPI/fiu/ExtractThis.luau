@@ -1493,17 +1493,70 @@ end
 
 local namecall_registry = setmetatable({}, {__mode = "k"})
 
+-- set by init.luau (cache.invalidate / cache.replace), checked on game:GetService
+local service_cache = {}
+__funny_service_cache = service_cache
+
+local function http_get(url)
+	local result = nil
+
+	local ok = pcall(function()
+		http:RequestInternal({
+			Url = url,
+			Method = "GET",
+			Headers = {
+				["Content-Type"] = "text/plain"
+			}
+		}):Start(function(s, b)
+			result = b
+			result["Success"] = s
+		end)
+	end)
+
+	if not ok then
+		error("HttpGet: RequestInternal unavailable", 0)
+	end
+
+	repeat task.wait() until result
+
+	if not result or not result.Success then
+		error("HttpGet: request failed for " .. tostring(url), 0)
+	end
+
+	return result.Body
+end
+
 local function namecall_handler(method, self, ...)
-	if typeof(self) ~= "table" then
+	namecall_registry[coroutine.running()] = method
+
+	if typeof(self) == "table" then
+		local mt = getmetatable(self)
+		local nc = type(mt) == "table" and rawget(mt, "__namecall")
+		if type(nc) == "function" and debug.info(nc, 's') then
+			return true, nc(self, ...)
+		end
 		return false
 	end
 
-	local mt = getmetatable(self)
-	local nc = type(mt) == "table" and rawget(mt, "__namecall")
-	if type(nc) == "function" and debug.info(nc, 's') then
-		namecall_registry[coroutine.running()] = method
-		return true, nc(self, ...)
+	if self == game then
+		if method == "HttpGet" or method == "HttpGetAsync" then
+			return true, http_get(...)
+		elseif method == "GetService" then
+			local name = ...
+			local cached = service_cache[name]
+			if cached ~= nil then
+				return true, cached
+			end
+			local ok, service = pcall(function()
+				return game:GetService(name)
+			end)
+			if ok and service then
+				service_cache[name] = service
+				return true, service
+			end
+		end
 	end
+
 	return false
 end
 

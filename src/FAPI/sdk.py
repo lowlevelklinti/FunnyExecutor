@@ -237,6 +237,9 @@ class Script(Instance):
         buffer = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_ptr)
         size = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_size)
 
+        if buffer == 0 or size == 0:
+            return b''
+
         return self.memory.read_bytes(buffer, size)
 
     def set_iscorescript(self, val):
