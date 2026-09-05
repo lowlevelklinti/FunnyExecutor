@@ -1207,7 +1207,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.365'
+	return 'FunnyExecutor', 'v0.370'
 end
 
 getexecutorname = function()
@@ -1299,7 +1299,7 @@ isourclosure = isexecutorclosure
 -- cloneref / compareinstances
 
 local clonerefs = {}
-setmetatable(clonerefs, {__mode = 'v'})
+setmetatable(clonerefs, {__mode = 'k'})
 
 local function clone_target(proxy)
 	local obj = clonerefs[proxy]
