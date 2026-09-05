@@ -12,8 +12,6 @@ local table_move = table.move
 local table_pack = table.pack
 local table_unpack = table.unpack
 local table_create = table.create
-local table_insert = table.insert
-local table_remove = table.remove
 local table_concat = table.concat
 
 local coroutine_create = coroutine.create
@@ -38,7 +36,7 @@ local bit32_extract = bit32.extract
 
 local os_clock = os.clock
 local task_wait = task.wait
-local yieldCheckInterval = 2048
+local yieldCheckInterval = 8192
 local defaultYieldBudget = 0.025
 
 local ttisnumber = function(v) return type(v) == "number" end
@@ -199,7 +197,9 @@ local function getmaxline(module, protoid)
 
 	for pc = 1, proto.sizecode do
 		local line = proto.instructionlineinfo[pc]
-		size = if (line > size) then line else size
+		if line then
+			size = if (line > size) then line else size
+		end
 	end
 
 	for i, subid in proto.protos do
@@ -215,22 +215,23 @@ local function getcoverage(module, protoid, depth, callback, size)
 
 	assert(proto.lineinfoenabled, "proto must have debug enabled")
 
-	local buffer = {}
+	local proto_code_op = proto.code_op
+	local proto_code_E = proto.code_E
+
+	local buf = {}
 
 	for pc = 1, proto.sizecode do
-		local inst = proto.code[pc]
-		local line = proto.instructionlineinfo[pc]
-
-		if (inst.opcode ~= 69) then --[[ COVERAGE ]]
+		if (proto_code_op[pc] ~= 69) then --[[ COVERAGE ]]
 			continue
 		end
 
-		local hits = inst.E
+		local hits = proto_code_E[pc]
+		local line = proto.instructionlineinfo[pc]
 
-		buffer[line] = if ((buffer[line] or 0) > hits) then buffer[line] else hits
+		buf[line] = if ((buf[line] or 0) > hits) then buf[line] else hits
 	end
 
-	callback(proto.debugname, proto.linedefined, depth, buffer, size)
+	callback(proto.debugname, proto.linedefined, depth, buf, size)
 
 	for i, subid in proto.protos do
 		getcoverage(module, subid, depth + 1, callback, size)
@@ -340,122 +341,6 @@ local function luau_deserialize(bytecode, luau_settings)
 		stringList[i] = readString()
 	end
 
-	local function readInstruction(codeList)
-		if yieldEnabled then
-			yieldCountdown -= 1
-			if yieldCountdown <= 0 then
-				yieldCountdown = yieldCheckInterval
-				if os_clock() > yieldDeadline then
-					pcall(task_wait)
-					yieldDeadline = os_clock() + yieldBudget
-				end
-			end
-		end
-
-		local value = readWord()
-		local opcode = bit32_band(luau_settings.decodeOp(value), 0xFF)
-
-		local opinfo = opList[opcode + 1]
-		local opname = opinfo[1]
-		local opmode = opinfo[2]
-		local kmode = opinfo[3]
-		local usesAux = opinfo[4]
-
-		local inst = {
-			opcode = opcode;
-			opname = opname;
-			opmode = opmode;
-			kmode = kmode;
-			usesAux = usesAux;
-		}
-
-		table_insert(codeList, inst)
-
-		if opmode == 1 then --[[ A ]]
-			inst.A = bit32_band(bit32_rshift(value, 8), 0xFF)
-		elseif opmode == 2 then --[[ AB ]]
-			inst.A = bit32_band(bit32_rshift(value, 8), 0xFF)
-			inst.B = bit32_band(bit32_rshift(value, 16), 0xFF)
-		elseif opmode == 3 then --[[ ABC ]]
-			inst.A = bit32_band(bit32_rshift(value, 8), 0xFF)
-			inst.B = bit32_band(bit32_rshift(value, 16), 0xFF)
-			inst.C = bit32_band(bit32_rshift(value, 24), 0xFF)
-		elseif opmode == 4 then --[[ AD ]]
-			inst.A = bit32_band(bit32_rshift(value, 8), 0xFF)
-			local temp = bit32_band(bit32_rshift(value, 16), 0xFFFF)
-			inst.D = if temp < 0x8000 then temp else temp - 0x10000
-		elseif opmode == 5 then --[[ AE ]]
-			local temp = bit32_band(bit32_rshift(value, 8), 0xFFFFFF)
-			inst.E = if temp < 0x800000 then temp else temp - 0x1000000
-		end
-
-		if usesAux then 
-			local aux = readWord()
-			inst.aux = aux
-
-			table_insert(codeList, {value = aux, opname = "auxvalue" })
-		end
-
-		return usesAux
-	end
-
-	local function checkkmode(inst, k)
-		if yieldEnabled then
-			yieldCountdown -= 1
-			if yieldCountdown <= 0 then
-				yieldCountdown = yieldCheckInterval
-				if os_clock() > yieldDeadline then
-					pcall(task_wait)
-					yieldDeadline = os_clock() + yieldBudget
-				end
-			end
-		end
-
-		local kmode = inst.kmode
-
-		if kmode == 1 then --// AUX
-			inst.K = k[inst.aux +  1]
-		elseif kmode == 2 then --// C
-			inst.K = k[inst.C + 1]
-		elseif kmode == 3 then--// D
-			inst.K = k[inst.D + 1]
-		elseif kmode == 4 then --// AUX import
-			local extend = inst.aux
-			local count = bit32_rshift(extend, 30)
-			local id0 = bit32_band(bit32_rshift(extend, 20), 0x3FF)
-
-			inst.K0 = k[id0 + 1]
-			inst.KC = count
-			if count == 2 then
-				local id1 = bit32_band(bit32_rshift(extend, 10), 0x3FF)
-
-				inst.K1 = k[id1 + 1]
-			elseif count == 3 then
-				local id1 = bit32_band(bit32_rshift(extend, 10), 0x3FF)
-				local id2 = bit32_band(bit32_rshift(extend, 0), 0x3FF)
-
-				inst.K1 = k[id1 + 1]
-				inst.K2 = k[id2 + 1]
-			end
-			if luau_settings.useImportConstants then
-				inst.K = resolveImportConstant(
-					luau_settings.staticEnvironment,
-					count, inst.K0, inst.K1, inst.K2
-				)
-			end
-		elseif kmode == 5 then --// AUX boolean low 1 bit
-			inst.K = bit32_extract(inst.aux, 0, 1) == 1
-			inst.KN = bit32_extract(inst.aux, 31, 1) == 1
-		elseif kmode == 6 then --// AUX number low 24 bits
-			inst.K = k[bit32_extract(inst.aux, 0, 24) + 1]
-			inst.KN = bit32_extract(inst.aux, 31, 1) == 1
-		elseif kmode == 7 then --// B
-			inst.K = k[inst.B + 1]
-		elseif kmode == 8 then --// AUX number low 16 bits
-			inst.K = bit32_band(inst.aux, 0xf)
-		end
-	end
-
 	local function readProto(bytecodeid)
 		local maxstacksize = readByte()
 		local numparams = readByte()
@@ -469,7 +354,78 @@ local function luau_deserialize(bytecode, luau_settings)
 		end
 
 		local sizecode = readVarInt()
-		local codelist = table_create(sizecode)
+
+		local code_op = table_create(sizecode)
+		local code_A = table_create(sizecode)
+		local code_B = table_create(sizecode)
+		local code_C = table_create(sizecode)
+		local code_D = table_create(sizecode)
+		local code_E = table_create(sizecode)
+		local code_K = table_create(sizecode)
+		local code_K0 = table_create(sizecode)
+		local code_K1 = table_create(sizecode)
+		local code_K2 = table_create(sizecode)
+		local code_KC = table_create(sizecode)
+		local code_KN = table_create(sizecode)
+		local code_aux = table_create(sizecode)
+		local code_kmode = table_create(sizecode) -- deserialization only
+
+		local pc_idx = 0
+
+		local function readInstruction()
+			if yieldEnabled then
+				yieldCountdown -= 1
+				if yieldCountdown <= 0 then
+					yieldCountdown = yieldCheckInterval
+					if os_clock() > yieldDeadline then
+						pcall(task_wait)
+						yieldDeadline = os_clock() + yieldBudget
+					end
+				end
+			end
+
+			pc_idx += 1
+			local cur = pc_idx
+
+			local value = readWord()
+			local opcode = bit32_band(luau_settings.decodeOp(value), 0xFF)
+
+			local opinfo = opList[opcode + 1]
+			local opmode = opinfo[2]
+			local kmode = opinfo[3]
+			local usesAux = opinfo[4]
+
+			code_op[cur] = opcode
+			code_kmode[cur] = kmode
+
+			if opmode == 1 then --[[ A ]]
+				code_A[cur] = bit32_band(bit32_rshift(value, 8), 0xFF)
+			elseif opmode == 2 then --[[ AB ]]
+				code_A[cur] = bit32_band(bit32_rshift(value, 8), 0xFF)
+				code_B[cur] = bit32_band(bit32_rshift(value, 16), 0xFF)
+			elseif opmode == 3 then --[[ ABC ]]
+				code_A[cur] = bit32_band(bit32_rshift(value, 8), 0xFF)
+				code_B[cur] = bit32_band(bit32_rshift(value, 16), 0xFF)
+				code_C[cur] = bit32_band(bit32_rshift(value, 24), 0xFF)
+			elseif opmode == 4 then --[[ AD ]]
+				code_A[cur] = bit32_band(bit32_rshift(value, 8), 0xFF)
+				local temp = bit32_band(bit32_rshift(value, 16), 0xFFFF)
+				code_D[cur] = if temp < 0x8000 then temp else temp - 0x10000
+			elseif opmode == 5 then --[[ AE ]]
+				local temp = bit32_band(bit32_rshift(value, 8), 0xFFFFFF)
+				code_E[cur] = if temp < 0x800000 then temp else temp - 0x1000000
+			end
+
+			if usesAux then
+				local aux = readWord()
+				code_aux[cur] = aux
+
+				pc_idx += 1
+				code_op[pc_idx] = 255 -- sentinel for aux placeholder
+			end
+
+			return usesAux
+		end
 
 		local skipnext = false 
 		for i = 1, sizecode do
@@ -478,13 +434,8 @@ local function luau_deserialize(bytecode, luau_settings)
 				continue 
 			end
 
-			skipnext = readInstruction(codelist)
+			skipnext = readInstruction()
 		end
-		
-		local debugcodelist = table_create(sizecode) 
-		for i = 1, sizecode do 
-			debugcodelist[i] = codelist[i].opcode
-		end 
 
 		local sizek = readVarInt()
 		local klist = table_create(sizek)
@@ -507,8 +458,8 @@ local function luau_deserialize(bytecode, luau_settings)
 				local dataLength = readVarInt()
 				k = table_create(dataLength)
 
-				for i = 1, dataLength do
-					k[i] = readVarInt()
+				for j = 1, dataLength do
+					k[j] = readVarInt()
 				end
 			elseif kt == 6 then --// Closure
 				k = readVarInt()
@@ -525,9 +476,59 @@ local function luau_deserialize(bytecode, luau_settings)
 			klist[i] = k
 		end
 
-		-- // 2nd pass to replace constant references in the instruction
-		for i = 1, sizecode do
-			checkkmode(codelist[i], klist)
+		for i = 1, pc_idx do
+			if yieldEnabled then
+				yieldCountdown -= 1
+				if yieldCountdown <= 0 then
+					yieldCountdown = yieldCheckInterval
+					if os_clock() > yieldDeadline then
+						pcall(task_wait)
+						yieldDeadline = os_clock() + yieldBudget
+					end
+				end
+			end
+
+			local kmode = code_kmode[i]
+
+			if kmode == 1 then --// AUX
+				code_K[i] = klist[code_aux[i] + 1]
+			elseif kmode == 2 then --// C
+				code_K[i] = klist[code_C[i] + 1]
+			elseif kmode == 3 then --// D
+				code_K[i] = klist[code_D[i] + 1]
+			elseif kmode == 4 then --// AUX import
+				local extend = code_aux[i]
+				local count = bit32_rshift(extend, 30)
+				local id0 = bit32_band(bit32_rshift(extend, 20), 0x3FF)
+
+				code_K0[i] = klist[id0 + 1]
+				code_KC[i] = count
+				if count == 2 then
+					local id1 = bit32_band(bit32_rshift(extend, 10), 0x3FF)
+					code_K1[i] = klist[id1 + 1]
+				elseif count == 3 then
+					local id1 = bit32_band(bit32_rshift(extend, 10), 0x3FF)
+					local id2 = bit32_band(bit32_rshift(extend, 0), 0x3FF)
+					code_K1[i] = klist[id1 + 1]
+					code_K2[i] = klist[id2 + 1]
+				end
+				if luau_settings.useImportConstants then
+					code_K[i] = resolveImportConstant(
+						luau_settings.staticEnvironment,
+						count, code_K0[i], code_K1[i], code_K2[i]
+					)
+				end
+			elseif kmode == 5 then --// AUX boolean low 1 bit
+				code_K[i] = bit32_extract(code_aux[i], 0, 1) == 1
+				code_KN[i] = bit32_extract(code_aux[i], 31, 1) == 1
+			elseif kmode == 6 then --// AUX number low 24 bits
+				code_K[i] = klist[bit32_extract(code_aux[i], 0, 24) + 1]
+				code_KN[i] = bit32_extract(code_aux[i], 31, 1) == 1
+			elseif kmode == 7 then --// B
+				code_K[i] = klist[code_B[i] + 1]
+			elseif kmode == 8 then --// AUX number low 16 bits
+				code_K[i] = bit32_band(code_aux[i], 0xf)
+			end
 		end
 
 		local sizep = readVarInt()
@@ -575,8 +576,7 @@ local function luau_deserialize(bytecode, luau_settings)
 			instructionlineinfo = table_create(sizecode)
 
 			for i = 1, sizecode do 
-				--// p->abslineinfo[pc >> p->linegaplog2] + p->lineinfo[pc];
-				table_insert(instructionlineinfo, abslineinfo[bit32_rshift(i - 1, linegaplog2) + 1] + lineinfo[i])
+				instructionlineinfo[i] = abslineinfo[bit32_rshift(i - 1, linegaplog2) + 1] + lineinfo[i]
 			end
 		end
 
@@ -603,9 +603,22 @@ local function luau_deserialize(bytecode, luau_settings)
 			linedefined = linedefined;
 			debugname = debugname;
 
-			sizecode = sizecode;
-			code = codelist;
-			debugcode = debugcodelist;
+			sizecode = pc_idx;
+
+			-- // flat instruction arrays
+			code_op = code_op;
+			code_A = code_A;
+			code_B = code_B;
+			code_C = code_C;
+			code_D = code_D;
+			code_E = code_E;
+			code_K = code_K;
+			code_K0 = code_K0;
+			code_K1 = code_K1;
+			code_K2 = code_K2;
+			code_KC = code_KC;
+			code_KN = code_KN;
+			code_aux = code_aux;
 
 			sizek = sizek;
 			k = klist;
@@ -620,7 +633,6 @@ local function luau_deserialize(bytecode, luau_settings)
 		}
 	end
 	
-	-- userdataRemapping (not used in VM, left unused)
 	if typesVersion == 3 then
 		local index = readByte()
 
@@ -672,6 +684,12 @@ local function luau_load(module, env, luau_settings)
 	local stepHook = luau_settings.callHooks.stepHook
 	local interruptHook = luau_settings.callHooks.interruptHook
 	local panicHook = luau_settings.callHooks.panicHook
+	local hasDebugHooks = (breakHook ~= nil) or (stepHook ~= nil) or (interruptHook ~= nil)
+
+	local useNativeNamecall = luau_settings.useNativeNamecall
+	local namecallHandler = luau_settings.namecallHandler
+	local useGeneralizedIteration = luau_settings.generalizedIteration
+	local useImportConstants = luau_settings.useImportConstants
 
 	local yieldEnabled = luau_settings.cooperativeYield ~= false
 	local yieldBudget = if type(luau_settings.cooperativeYieldBudget) == "number" then luau_settings.cooperativeYieldBudget else defaultYieldBudget
@@ -684,12 +702,11 @@ local function luau_load(module, env, luau_settings)
 
 	local function luau_wrapclosure(module, proto, upvals)
 		local function luau_execute(...)
-			local debugging, stack, protos, code, varargs
+			local debugging, stack, protos, varargs
 			
 			if luau_settings.errorHandling then
-				debugging, stack, protos, code, varargs = ... 
+				debugging, stack, protos, varargs = ... 
 			else 
-				--// Copied from error handling wrapper
 				local passed = table_pack(...)
 				stack = table_create(proto.maxstacksize)
 				varargs = {
@@ -711,30 +728,41 @@ local function luau_load(module, env, luau_settings)
 				debugging = {pc = 0, name = "NONE"}
 
 				protos = proto.protos 
-				code = proto.code
-			end 
+			end
 
-			local top, pc, open_upvalues, generalized_iterators = -1, 1, setmetatable({}, {__mode = "vs"}), setmetatable({}, {__mode = "ks"})
+			local code_op = proto.code_op
+			local code_A = proto.code_A
+			local code_B = proto.code_B
+			local code_C = proto.code_C
+			local code_D = proto.code_D
+			local code_E = proto.code_E
+			local code_K = proto.code_K
+			local code_K0 = proto.code_K0
+			local code_K1 = proto.code_K1
+			local code_K2 = proto.code_K2
+			local code_KC = proto.code_KC
+			local code_KN = proto.code_KN
+			local code_aux = proto.code_aux
+
+			local top, pc, open_upvalues, generalized_iterators = -1, 1, {}, {}
 			local constants = proto.k
-			local debugopcodes = proto.debugcode
 			local extensions = luau_settings.extensions
 
 			local yieldCountdown = yieldCheckInterval
 			local yieldDeadline = os_clock() + yieldBudget
 
 			local handlingBreak = false
-			local inst, op
+			local op
 			while alive do
+				local ipc = pc
+
 				if not handlingBreak then
-					inst = code[pc]
-					op = inst.opcode
+					op = code_op[pc]
 				end
 
 				handlingBreak = false
 
 				debugging.pc = pc
-				debugging.top = top
-				debugging.name = inst.opname
 
 				pc += 1
 
@@ -749,15 +777,19 @@ local function luau_load(module, env, luau_settings)
 					end
 				end
 
-				if stepHook then
-					stepHook(stack, debugging, proto, module, upvals)
+				if hasDebugHooks then
+					debugging.top = top
+					debugging.name = opList[op + 1] and opList[op + 1][1] or "AUX"
+					if stepHook then
+						stepHook(stack, debugging, proto, module, upvals)
+					end
 				end
 
 				if op == 0 then --[[ NOP ]]
-					--// Do nothing
+					--// Do nun
 				elseif op == 1 then --[[ BREAK ]]
 					if breakHook then
-						local results = table.pack(breakHook(stack, debugging, proto, module, upvals))
+						local results = table_pack(breakHook(stack, debugging, proto, module, upvals))
 						
 						if results[1] then 
 							return table_unpack(results, 2, #results)
@@ -765,39 +797,40 @@ local function luau_load(module, env, luau_settings)
 					end
 					
 					pc -= 1
-					op = debugopcodes[pc]
+					op = code_op[pc]
 					handlingBreak = true
 				elseif op == 2 then --[[ LOADNIL ]]
-					stack[inst.A] = nil
+					stack[code_A[ipc]] = nil
 				elseif op == 3 then --[[ LOADB ]]
-					stack[inst.A] = inst.B == 1
-					pc += inst.C
+					stack[code_A[ipc]] = code_B[ipc] == 1
+					pc += code_C[ipc]
 				elseif op == 4 then --[[ LOADN ]]
-					stack[inst.A] = inst.D
+					stack[code_A[ipc]] = code_D[ipc]
 				elseif op == 5 then --[[ LOADK ]]
-					stack[inst.A] = inst.K
+					stack[code_A[ipc]] = code_K[ipc]
 				elseif op == 6 then --[[ MOVE ]]
-					stack[inst.A] = stack[inst.B]
+					stack[code_A[ipc]] = stack[code_B[ipc]]
 				elseif op == 7 then --[[ GETGLOBAL ]]
-					local kv = inst.K
+					local kv = code_K[ipc]
 
-					stack[inst.A] = extensions[kv] or env[kv]
+					stack[code_A[ipc]] = extensions[kv] or env[kv]
 
-					pc += 1 --// adjust for aux
+					pc += 1 
 				elseif op == 8 then --[[ SETGLOBAL ]]
-					local kv = inst.K
-					env[kv] = stack[inst.A]
+					local kv = code_K[ipc]
+					env[kv] = stack[code_A[ipc]]
 
-					pc += 1 --// adjust for aux
+					pc += 1 
 				elseif op == 9 then --[[ GETUPVAL ]]
-					local uv = upvals[inst.B + 1]
-					stack[inst.A] = uv.store[uv.index]
+					local uv = upvals[code_B[ipc] + 1]
+					stack[code_A[ipc]] = uv.store[uv.index]
 				elseif op == 10 then --[[ SETUPVAL ]]
-					local uv = upvals[inst.B + 1]
-					uv.store[uv.index] = stack[inst.A]
+					local uv = upvals[code_B[ipc] + 1]
+					uv.store[uv.index] = stack[code_A[ipc]]
 				elseif op == 11 then --[[ CLOSEUPVALS ]]
+					local target = code_A[ipc]
 					for i, uv in open_upvalues do
-						if uv.index >= inst.A then
+						if uv.index >= target then
 							uv.value = uv.store[uv.index]
 							uv.store = uv
 							uv.index = "value" --// self reference
@@ -805,64 +838,61 @@ local function luau_load(module, env, luau_settings)
 						end
 					end
 				elseif op == 12 then --[[ GETIMPORT ]]
-					if luau_settings.useImportConstants then
-						stack[inst.A] = inst.K
+					if useImportConstants then
+						stack[code_A[ipc]] = code_K[ipc]
 					else
-						local count = inst.KC
-						local k0 = inst.K0
+						local count = code_KC[ipc]
+						local k0 = code_K0[ipc]
 						local import = extensions[k0] or env[k0]
 						if count == 1 then
-							stack[inst.A] = import
+							stack[code_A[ipc]] = import
 						elseif count == 2 then
-							stack[inst.A] = import[inst.K1]
+							stack[code_A[ipc]] = import[code_K1[ipc]]
 						elseif count == 3 then
-							stack[inst.A] = import[inst.K1][inst.K2]
+							stack[code_A[ipc]] = import[code_K1[ipc]][code_K2[ipc]]
 						end
 					end
 
 					pc += 1 --// adjust for aux 
 				elseif op == 13 then --[[ GETTABLE ]]
-					stack[inst.A] = stack[inst.B][stack[inst.C]]
+					stack[code_A[ipc]] = stack[code_B[ipc]][stack[code_C[ipc]]]
 				elseif op == 14 then --[[ SETTABLE ]]
-					stack[inst.B][stack[inst.C]] = stack[inst.A]
+					stack[code_B[ipc]][stack[code_C[ipc]]] = stack[code_A[ipc]]
 				elseif op == 15 then --[[ GETTABLEKS ]]
-					local index = inst.K
-					stack[inst.A] = stack[inst.B][index]
+					stack[code_A[ipc]] = stack[code_B[ipc]][code_K[ipc]]
 
 					pc += 1 --// adjust for aux 
 				elseif op == 16 then --[[ SETTABLEKS ]]
-					local index = inst.K
-					stack[inst.B][index] = stack[inst.A]
+					stack[code_B[ipc]][code_K[ipc]] = stack[code_A[ipc]]
 
 					pc += 1 --// adjust for aux
 				elseif op == 17 then --[[ GETTABLEN ]]
-					stack[inst.A] = stack[inst.B][inst.C + 1]
+					stack[code_A[ipc]] = stack[code_B[ipc]][code_C[ipc] + 1]
 				elseif op == 18 then --[[ SETTABLEN ]]
-					stack[inst.B][inst.C + 1] = stack[inst.A]
+					stack[code_B[ipc]][code_C[ipc] + 1] = stack[code_A[ipc]]
 				elseif op == 19 then --[[ NEWCLOSURE ]]
-					local newPrototype = protolist[protos[inst.D + 1]]
+					local newPrototype = protolist[protos[code_D[ipc] + 1]]
 
 					local nups = newPrototype.nups
 					local upvalues = table_create(nups)
-					stack[inst.A] = luau_wrapclosure(module, newPrototype, upvalues)
+					stack[code_A[ipc]] = luau_wrapclosure(module, newPrototype, upvalues)
 
 					for i = 1, nups do
-						local pseudo = code[pc]
+						local cap_A = code_A[pc]
+						local cap_B = code_B[pc]
 
 						pc += 1
 
-						local type = pseudo.A
-
-						if type == 0 then --// value
+						if cap_A == 0 then --// value
 							local upvalue = {
-								value = stack[pseudo.B],
+								value = stack[cap_B],
 								index = "value",--// self reference
 							}
 							upvalue.store = upvalue
 
 							upvalues[i] = upvalue
-						elseif type == 1 then --// reference
-							local index = pseudo.B
+						elseif cap_A == 1 then --// reference
+							local index = cap_B
 							local prev = open_upvalues[index]
 
 							if prev == nil then
@@ -874,15 +904,15 @@ local function luau_load(module, env, luau_settings)
 							end
 
 							upvalues[i] = prev
-						elseif type == 2 then --// upvalue
-							upvalues[i] = upvals[pseudo.B + 1]
+						elseif cap_A == 2 then --// upvalue
+							upvalues[i] = upvals[cap_B + 1]
 						end
 					end
 				elseif op == 20 then --[[ NAMECALL ]]
-					local A = inst.A
-					local B = inst.B
+					local A = code_A[ipc]
+					local B = code_B[ipc]
 
-					local kv = inst.K
+					local kv = code_K[ipc]
 					
 					local sb = stack[B]
 
@@ -892,42 +922,29 @@ local function luau_load(module, env, luau_settings)
 					
 					local useFallback = true
 					
-					--// Special handling for native namecall behaviour
-					local useNativeHandler = luau_settings.useNativeNamecall
+					if useNativeNamecall then
+						local callA, callB, callC = code_A[pc], code_B[pc], code_C[pc]
 
-					if useNativeHandler then
-						local nativeNamecall = luau_settings.namecallHandler
-
-						local callInst = code[pc]
-						local callOp = callInst.opcode
-
-						--// Copied from the CALL handler under
-						local callA, callB, callC = callInst.A, callInst.B, callInst.C
-
-						if stepHook then
-							stepHook(stack, debugging, proto, module, upvals)
-						end
-
-						if interruptHook then
-							interruptHook(stack, debugging, proto, module, upvals)	
+						if hasDebugHooks then
+							if stepHook then
+								stepHook(stack, debugging, proto, module, upvals)
+							end
+							if interruptHook then
+								interruptHook(stack, debugging, proto, module, upvals)	
+							end
 						end
 
 						local params = if callB == 0 then top - callA else callB - 1
 						local ret_list = table_pack(
-							nativeNamecall(kv, table_unpack(stack, callA + 1, callA + params))
+							namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
 						)
 
 						if ret_list[1] == true then
 							useFallback = false
 							
-							pc += 1 --// Skip next CALL instruction
+							pc += 1 
 
-							inst = callInst
-							op = callOp
 							debugging.pc = pc
-							debugging.name = inst.opname
-
-							table_remove(ret_list, 1)
 
 							local ret_num = ret_list.n - 1
 
@@ -937,7 +954,7 @@ local function luau_load(module, env, luau_settings)
 								ret_num = callC - 1
 							end
 
-							table_move(ret_list, 1, ret_num, callA, stack)
+							table_move(ret_list, 2, ret_num + 1, callA, stack)
 						end
 					end
 					
@@ -949,7 +966,7 @@ local function luau_load(module, env, luau_settings)
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					local A, B, C = inst.A, inst.B, inst.C
+					local A, B, C = code_A[ipc], code_B[ipc], code_C[ipc]
 
 					local params = if B == 0 then top - A else B - 1
 					local func = stack[A]
@@ -971,8 +988,8 @@ local function luau_load(module, env, luau_settings)
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					local A = inst.A
-					local B = inst.B 
+					local A = code_A[ipc]
+					local B = code_B[ipc] 
 					local b = B - 1
 					local nresults
 
@@ -984,95 +1001,95 @@ local function luau_load(module, env, luau_settings)
 
 					return table_unpack(stack, A, A + nresults - 1)
 				elseif op == 23 then --[[ JUMP ]]
-					pc += inst.D
+					pc += code_D[ipc]
 				elseif op == 24 then --[[ JUMPBACK ]]
 					if interruptHook then
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					pc += inst.D
+					pc += code_D[ipc]
 				elseif op == 25 then --[[ JUMPIF ]]
-					if stack[inst.A] then
-						pc += inst.D
+					if stack[code_A[ipc]] then
+						pc += code_D[ipc]
 					end
 				elseif op == 26 then --[[ JUMPIFNOT ]]
-					if not stack[inst.A] then
-						pc += inst.D
+					if not stack[code_A[ipc]] then
+						pc += code_D[ipc]
 					end
 				elseif op == 27 then --[[ JUMPIFEQ ]]
-					if stack[inst.A] == stack[inst.aux] then
-						pc += inst.D
+					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 28 then --[[ JUMPIFLE ]]
-					if stack[inst.A] <= stack[inst.aux] then
-						pc += inst.D
+					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 29 then --[[ JUMPIFLT ]]
-					if stack[inst.A] < stack[inst.aux] then
-						pc += inst.D
+					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 30 then --[[ JUMPIFNOTEQ ]]
-					if stack[inst.A] == stack[inst.aux] then
+					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
 						pc += 1
 					else
-						pc += inst.D
+						pc += code_D[ipc]
 					end
 				elseif op == 31 then --[[ JUMPIFNOTLE ]]
-					if stack[inst.A] <= stack[inst.aux] then
+					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
 						pc += 1
 					else
-						pc += inst.D
+						pc += code_D[ipc]
 					end
 				elseif op == 32 then --[[ JUMPIFNOTLT ]]
-					if stack[inst.A] < stack[inst.aux] then
+					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
 						pc += 1
 					else
-						pc += inst.D
+						pc += code_D[ipc]
 					end
 				elseif op == 33 then --[[ ADD ]]
-					stack[inst.A] = stack[inst.B] + stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] + stack[code_C[ipc]]
 				elseif op == 34 then --[[ SUB ]]
-					stack[inst.A] = stack[inst.B] - stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] - stack[code_C[ipc]]
 				elseif op == 35 then --[[ MUL ]]
-					stack[inst.A] = stack[inst.B] * stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] * stack[code_C[ipc]]
 				elseif op == 36 then --[[ DIV ]]
-					stack[inst.A] = stack[inst.B] / stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] / stack[code_C[ipc]]
 				elseif op == 37 then --[[ MOD ]]
-					stack[inst.A] = stack[inst.B] % stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] % stack[code_C[ipc]]
 				elseif op == 38 then --[[ POW ]]
-					stack[inst.A] = stack[inst.B] ^ stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] ^ stack[code_C[ipc]]
 				elseif op == 39 then --[[ ADDK ]]
-					stack[inst.A] = stack[inst.B] + inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] + code_K[ipc]
 				elseif op == 40 then --[[ SUBK ]]
-					stack[inst.A] = stack[inst.B] - inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] - code_K[ipc]
 				elseif op == 41 then --[[ MULK ]]
-					stack[inst.A] = stack[inst.B] * inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] * code_K[ipc]
 				elseif op == 42 then --[[ DIVK ]]
-					stack[inst.A] = stack[inst.B] / inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] / code_K[ipc]
 				elseif op == 43 then --[[ MODK ]]
-					stack[inst.A] = stack[inst.B] % inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] % code_K[ipc]
 				elseif op == 44 then --[[ POWK ]]
-					stack[inst.A] = stack[inst.B] ^ inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] ^ code_K[ipc]
 				elseif op == 45 then --[[ AND ]]
-					local value = stack[inst.B]
-					stack[inst.A] = if value then stack[inst.C] or false else value
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then stack[code_C[ipc]] or false else value
 				elseif op == 46 then --[[ OR ]]
-					local value = stack[inst.B]
-					stack[inst.A] = if value then value else stack[inst.C] or false
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then value else stack[code_C[ipc]] or false
 				elseif op == 47 then --[[ ANDK ]]
-					local value = stack[inst.B]
-					stack[inst.A] = if value then inst.K or false else value
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then code_K[ipc] or false else value
 				elseif op == 48 then --[[ ORK ]]
-					local value = stack[inst.B]
-					stack[inst.A] = if value then value else inst.K or false
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then value else code_K[ipc] or false
 				elseif op == 49 then --[[ CONCAT ]]
-					local B, C = inst.B, inst.C
+					local B, C = code_B[ipc], code_C[ipc]
 					local success, s = pcall(table_concat, stack, "", B, C)
 	
 					if not success then
@@ -1083,38 +1100,38 @@ local function luau_load(module, env, luau_settings)
 						end
 					end
 
-					stack[inst.A] = s
+					stack[code_A[ipc]] = s
 				elseif op == 50 then --[[ NOT ]]
-					stack[inst.A] = not stack[inst.B]
+					stack[code_A[ipc]] = not stack[code_B[ipc]]
 				elseif op == 51 then --[[ MINUS ]]
-					stack[inst.A] = -stack[inst.B]
+					stack[code_A[ipc]] = -stack[code_B[ipc]]
 				elseif op == 52 then --[[ LENGTH ]]
-					stack[inst.A] = #stack[inst.B]
+					stack[code_A[ipc]] = #stack[code_B[ipc]]
 				elseif op == 53 then --[[ NEWTABLE ]]
-					stack[inst.A] = table_create(inst.aux)
+					stack[code_A[ipc]] = table_create(code_aux[ipc])
 
 					pc += 1 --// adjust for aux 
 				elseif op == 54 then --[[ DUPTABLE ]]
-					local template = inst.K
+					local template = code_K[ipc]
 					local serialized = {}
 					for _, id in template do
 						serialized[constants[id + 1]] = nil
 					end
-					stack[inst.A] = serialized
+					stack[code_A[ipc]] = serialized
 				elseif op == 55 then --[[ SETLIST ]]
-					local A = inst.A
-					local B = inst.B
-					local c = inst.C - 1
+					local A = code_A[ipc]
+					local B = code_B[ipc]
+					local c = code_C[ipc] - 1
 
 					if c == LUA_MULTRET then
 						c = top - B + 1
 					end
 
-					table_move(stack, B, B + c - 1, inst.aux, stack[A])
+					table_move(stack, B, B + c - 1, code_aux[ipc], stack[A])
 
 					pc += 1 --// adjust for aux 
 				elseif op == 56 then --[[ FORNPREP ]]
-					local A = inst.A
+					local A = code_A[ipc]
 
 					local limit = stack[A]
 					if not ttisnumber(limit) then
@@ -1154,11 +1171,11 @@ local function luau_load(module, env, luau_settings)
 
 					if step > 0 then
 						if not (index <= limit) then
-							pc += inst.D
+							pc += code_D[ipc]
 						end
 					else
 						if not (limit <= index) then
-							pc += inst.D
+							pc += code_D[ipc]
 						end
 					end
 				elseif op == 57 then --[[ FORNLOOP ]]
@@ -1166,7 +1183,7 @@ local function luau_load(module, env, luau_settings)
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					local A = inst.A
+					local A = code_A[ipc]
 					local limit = stack[A]
 					local step = stack[A + 1]
 					local index = stack[A + 2] + step
@@ -1175,11 +1192,11 @@ local function luau_load(module, env, luau_settings)
 
 					if step > 0 then
 						if index <= limit then
-							pc += inst.D
+							pc += code_D[ipc]
 						end
 					else
 						if limit <= index then
-							pc += inst.D
+							pc += code_D[ipc]
 						end
 					end
 				elseif op == 58 then --[[ FORGLOOP ]]
@@ -1187,56 +1204,56 @@ local function luau_load(module, env, luau_settings)
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					local A = inst.A
-					local res = inst.K
+					local A = code_A[ipc]
+					local res = code_K[ipc]
 
 					top = A + 6
 
 					local it = stack[A]
 
-					if (luau_settings.generalizedIteration == false) or ttisfunction(it) then 
+					if (useGeneralizedIteration == false) or ttisfunction(it) then 
 						local vals = { it(stack[A + 1], stack[A + 2]) }
 						table_move(vals, 1, res, A + 3, stack)
 
 						if stack[A + 3] ~= nil then
 							stack[A + 2] = stack[A + 3]
-							pc += inst.D
+							pc += code_D[ipc]
 						else
 							pc += 1
 						end
 					else
-						local ok, vals = coroutine_resume(generalized_iterators[inst], it, stack[A + 1], stack[A + 2])
+						local ok, vals = coroutine_resume(generalized_iterators[ipc], it, stack[A + 1], stack[A + 2])
 						if not ok then
 							error(vals)
 						end
 						if vals == LUA_GENERALIZED_TERMINATOR then 
-							generalized_iterators[inst] = nil
+							generalized_iterators[ipc] = nil
 							pc += 1
 						else
 							table_move(vals, 1, res, A + 3, stack)
 
 							stack[A + 2] = stack[A + 3]
-							pc += inst.D
+							pc += code_D[ipc]
 						end
 					end
 				elseif op == 59 then --[[ FORGPREP_INEXT ]]
-					if not ttisfunction(stack[inst.A]) then
-						error(string_format("attempt to iterate over a %s value", type(stack[inst.A]))) -- FORGPREP_INEXT encountered non-function value
+					if not ttisfunction(stack[code_A[ipc]]) then
+						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_INEXT encountered non-function value
 					end
 
-					pc += inst.D
+					pc += code_D[ipc]
 				elseif op == 60 then --[[ FASTCALL3 ]]
 					--[[ Skipped ]]
 					pc += 1 --// adjust for aux
 				elseif op == 61 then --[[ FORGPREP_NEXT ]]
-					if not ttisfunction(stack[inst.A]) then
-						error(string_format("attempt to iterate over a %s value", type(stack[inst.A]))) -- FORGPREP_NEXT encountered non-function value
+					if not ttisfunction(stack[code_A[ipc]]) then
+						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_NEXT encountered non-function value
 					end
 
-					pc += inst.D
+					pc += code_D[ipc]
 				elseif op == 63 then --[[ GETVARARGS ]]
-					local A = inst.A
-					local b = inst.B - 1
+					local A = code_A[ipc]
+					local b = code_B[ipc] - 1
 
 					if b == LUA_MULTRET then
 						b = varargs.len
@@ -1245,36 +1262,34 @@ local function luau_load(module, env, luau_settings)
 
 					table_move(varargs.list, 1, b, A, stack)
 				elseif op == 64 then --[[ DUPCLOSURE ]]
-					local newPrototype = protolist[inst.K + 1] --// correct behavior would be to reuse the prototype if possible but it would not be useful here
+					local newPrototype = protolist[code_K[ipc] + 1]
 
 					local nups = newPrototype.nups
 					local upvalues = table_create(nups)
-					stack[inst.A] = luau_wrapclosure(module, newPrototype, upvalues)
+					stack[code_A[ipc]] = luau_wrapclosure(module, newPrototype, upvalues)
 
 					for i = 1, nups do
-						local pseudo = code[pc]
+						local cap_A = code_A[pc]
+						local cap_B = code_B[pc]
 						pc += 1
 
-						local type = pseudo.A
-						if type == 0 then --// value
+						if cap_A == 0 then --// value
 							local upvalue = {
-								value = stack[pseudo.B],
+								value = stack[cap_B],
 								index = "value",--// self reference
 							}
 							upvalue.store = upvalue
 
 							upvalues[i] = upvalue
 
-							--// references dont get handled by DUPCLOSURE
-						elseif type == 2 then --// upvalue
-							upvalues[i] = upvals[pseudo.B + 1]
+						elseif cap_A == 2 then --// upvalue
+							upvalues[i] = upvals[cap_B + 1]
 						end
 					end
 				elseif op == 65 then --[[ PREPVARARGS ]]
 					--[[ Handled by wrapper ]]
 				elseif op == 66 then --[[ LOADKX ]]
-					local kv = inst.K
-					stack[inst.A] = kv
+					stack[code_A[ipc]] = code_K[ipc]
 
 					pc += 1 --// adjust for aux 
 				elseif op == 67 then --[[ JUMPX ]]
@@ -1282,18 +1297,18 @@ local function luau_load(module, env, luau_settings)
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					pc += inst.E
+					pc += code_E[ipc]
 				elseif op == 68 then --[[ FASTCALL ]]
 					--[[ Skipped ]]
 				elseif op == 69 then --[[ COVERAGE ]]
-					inst.E += 1
+					code_E[ipc] = (code_E[ipc] or 0) + 1
 				elseif op == 70 then --[[ CAPTURE ]]
 					--[[ Handled by CLOSURE ]]
 					error("encountered unhandled CAPTURE")
 				elseif op == 71 then --[[ SUBRK ]]
-					stack[inst.A] = inst.K - stack[inst.C]
+					stack[code_A[ipc]] = code_K[ipc] - stack[code_C[ipc]]
 				elseif op == 72 then --[[ DIVRK ]]
-					stack[inst.A] = inst.K / stack[inst.C]
+					stack[code_A[ipc]] = code_K[ipc] / stack[code_C[ipc]]
 				elseif op == 73 then --[[ FASTCALL1 ]]
 					--[[ Skipped ]]
 				elseif op == 74 then --[[ FASTCALL2 ]]
@@ -1303,11 +1318,11 @@ local function luau_load(module, env, luau_settings)
 					--[[ Skipped ]]
 					pc += 1 --// adjust for aux
 				elseif op == 76 then --[[ FORGPREP ]]
-					local iterator = stack[inst.A]
+					local iterator = stack[code_A[ipc]]
 
-					if luau_settings.generalizedIteration and not ttisfunction(iterator) then
-						local loopInstruction = code[pc + inst.D]
-						if generalized_iterators[loopInstruction] == nil then 
+					if useGeneralizedIteration and not ttisfunction(iterator) then
+						local loop_pc = pc + code_D[ipc]
+						if generalized_iterators[loop_pc] == nil then 
 							local function gen_iterator(...)
 								for r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31, r32, r33, r34, r35, r36, r37, r38, r39, r40, r41, r42, r43, r44, r45, r46, r47, r48, r49, r50, r51, r52, r53, r54, r55, r56, r57, r58, r59, r60, r61, r62, r63, r64, r65, r66, r67, r68, r69, r70, r71, r72, r73, r74, r75, r76, r77, r78, r79, r80, r81, r82, r83, r84, r85, r86, r87, r88, r89, r90, r91, r92, r93, r94, r95, r96, r97, r98, r99, r100, r101, r102, r103, r104, r105, r106, r107, r108, r109, r110, r111, r112, r113, r114, r115, r116, r117, r118, r119, r120, r121, r122, r123, r124, r125, r126, r127, r128, r129, r130, r131, r132, r133, r134, r135, r136, r137, r138, r139, r140, r141, r142, r143, r144, r145, r146, r147, r148, r149, r150, r151, r152, r153, r154, r155, r156, r157, r158, r159, r160, r161, r162, r163, r164, r165, r166, r167, r168, r169, r170, r171, r172, r173, r174, r175, r176, r177, r178, r179, r180, r181, r182, r183, r184, r185, r186, r187, r188, r189, r190, r191, r192, r193, r194, r195, r196, r197, r198, r199, r200 in ... do 
 									coroutine_yield({r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30, r31, r32, r33, r34, r35, r36, r37, r38, r39, r40, r41, r42, r43, r44, r45, r46, r47, r48, r49, r50, r51, r52, r53, r54, r55, r56, r57, r58, r59, r60, r61, r62, r63, r64, r65, r66, r67, r68, r69, r70, r71, r72, r73, r74, r75, r76, r77, r78, r79, r80, r81, r82, r83, r84, r85, r86, r87, r88, r89, r90, r91, r92, r93, r94, r95, r96, r97, r98, r99, r100, r101, r102, r103, r104, r105, r106, r107, r108, r109, r110, r111, r112, r113, r114, r115, r116, r117, r118, r119, r120, r121, r122, r123, r124, r125, r126, r127, r128, r129, r130, r131, r132, r133, r134, r135, r136, r137, r138, r139, r140, r141, r142, r143, r144, r145, r146, r147, r148, r149, r150, r151, r152, r153, r154, r155, r156, r157, r158, r159, r160, r161, r162, r163, r164, r165, r166, r167, r168, r169, r170, r171, r172, r173, r174, r175, r176, r177, r178, r179, r180, r181, r182, r183, r184, r185, r186, r187, r188, r189, r190, r191, r192, r193, r194, r195, r196, r197, r198, r199, r200})
@@ -1316,55 +1331,56 @@ local function luau_load(module, env, luau_settings)
 								coroutine_yield(LUA_GENERALIZED_TERMINATOR)
 							end
 
-							generalized_iterators[loopInstruction] = coroutine_create(gen_iterator)
+							generalized_iterators[loop_pc] = coroutine_create(gen_iterator)
 						end
 					end
 
-					pc += inst.D
+					pc += code_D[ipc]
 				elseif op == 77 then --[[ JUMPXEQKNIL ]]
-					local kn = inst.KN
+					local kn = code_KN[ipc]
 
-					if (stack[inst.A] == nil) ~= kn then
-						pc += inst.D
+					if (stack[code_A[ipc]] == nil) ~= kn then
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 78 then --[[ JUMPXEQKB ]]
-					local kv = inst.K
-					local kn = inst.KN
-					local ra = stack[inst.A]
+					local kv = code_K[ipc]
+					local kn = code_KN[ipc]
+					local ra = stack[code_A[ipc]]
 
 					if (ttisboolean(ra) and (ra == kv)) ~= kn then
-						pc += inst.D
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 79 then --[[ JUMPXEQKN ]]
-					local kv = inst.K
-					local kn = inst.KN
-					local ra = stack[inst.A]
+					local kv = code_K[ipc]
+					local kn = code_KN[ipc]
+					local ra = stack[code_A[ipc]]
 
 					if (ra == kv) ~= kn then
-						pc += inst.D
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 80 then --[[ JUMPXEQKS ]]
-					local kv = inst.K
-					local kn = inst.KN
-					local ra = stack[inst.A]
+					local kv = code_K[ipc]
+					local kn = code_KN[ipc]
+					local ra = stack[code_A[ipc]]
 
 					if (ra == kv) ~= kn then
-						pc += inst.D
+						pc += code_D[ipc]
 					else
 						pc += 1
 					end
 				elseif op == 81 then --[[ IDIV ]]
-					stack[inst.A] = stack[inst.B] // stack[inst.C]
+					stack[code_A[ipc]] = stack[code_B[ipc]] // stack[code_C[ipc]]
 				elseif op == 82 then --[[ IDIVK ]]
-					stack[inst.A] = stack[inst.B] // inst.K
+					stack[code_A[ipc]] = stack[code_B[ipc]] // code_K[ipc]
 				else
-					error("Unsupported Opcode: " .. inst.opname .. " op: " .. op)
+					local opname = opList[op + 1]
+					error("Unsupported Opcode: " .. (opname and opname[1] or "?") .. " op: " .. op)
 				end
 			end
 
@@ -1403,9 +1419,9 @@ local function luau_load(module, env, luau_settings)
 			local debugging = {pc = 0, name = "NONE"}
 			local result
 			if luau_settings.errorHandling then 
-				result = table_pack(pcall(luau_execute, debugging, stack, proto.protos, proto.code, varargs))
+				result = table_pack(pcall(luau_execute, debugging, stack, proto.protos, varargs))
 			else
-				result = table_pack(true, luau_execute(debugging, stack, proto.protos, proto.code, varargs))
+				result = table_pack(true, luau_execute(debugging, stack, proto.protos, varargs))
 			end
 
 			if result[1] then
@@ -1425,10 +1441,19 @@ local function luau_load(module, env, luau_settings)
 					end
 				end
 
+				local opname
+				local dbgpc = debugging.pc
+				if dbgpc and proto.code_op then
+					local opinfo = opList[(proto.code_op[dbgpc] or 0) + 1]
+					opname = opinfo and opinfo[1] or "UNKNOWN"
+				else
+					opname = debugging.name or "UNKNOWN"
+				end
+
 				if proto.lineinfoenabled then
-					return error(string_format("Fiu VM Error { Name: %s Line: %s PC: %s Opcode: %s }: %s", proto.debugname, proto.instructionlineinfo[debugging.pc], debugging.pc, debugging.name, message), 0)
+					return error(string_format("Fiu VM Error { Name: %s Line: %s PC: %s Opcode: %s }: %s", proto.debugname, proto.instructionlineinfo[dbgpc], dbgpc, opname, message), 0)
 				else 
-					return error(string_format("Fiu VM Error { Name: %s PC: %s Opcode: %s }: %s", proto.debugname, debugging.pc, debugging.name, message), 0)
+					return error(string_format("Fiu VM Error { Name: %s PC: %s Opcode: %s }: %s", proto.debugname, dbgpc, opname, message), 0)
 				end
 			end
 		end
