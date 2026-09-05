@@ -701,6 +701,8 @@ local function luau_load(module, env, luau_settings)
 	end
 
 	local function luau_wrapclosure(module, proto, upvals)
+		local dbg_pc = 0
+
 		local function luau_execute(...)
 			local debugging, stack, protos, varargs
 			
@@ -762,7 +764,7 @@ local function luau_load(module, env, luau_settings)
 
 				handlingBreak = false
 
-				debugging.pc = pc
+				dbg_pc = pc
 
 				pc += 1
 
@@ -778,6 +780,7 @@ local function luau_load(module, env, luau_settings)
 				end
 
 				if hasDebugHooks then
+					debugging.pc = dbg_pc
 					debugging.top = top
 					debugging.name = opList[op + 1] and opList[op + 1][1] or "AUX"
 					if stepHook then
@@ -935,26 +938,51 @@ local function luau_load(module, env, luau_settings)
 						end
 
 						local params = if callB == 0 then top - callA else callB - 1
-						local ret_list = table_pack(
-							namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
-						)
 
-						if ret_list[1] == true then
-							useFallback = false
-							
-							pc += 1 
-
-							debugging.pc = pc
-
-							local ret_num = ret_list.n - 1
-
-							if callC == 0 then
-								top = callA + ret_num - 1
-							else
-								ret_num = callC - 1
+						if callC == 1 then
+							local ok = namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
+							if ok == true then
+								useFallback = false
+								pc += 1
+								dbg_pc = pc
 							end
+						elseif callC == 2 then
+							local ok, r1 = namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
+							if ok == true then
+								useFallback = false
+								pc += 1
+								dbg_pc = pc
+								stack[callA] = r1
+							end
+						elseif callC == 3 then
+							local ok, r1, r2 = namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
+							if ok == true then
+								useFallback = false
+								pc += 1
+								dbg_pc = pc
+								stack[callA] = r1
+								stack[callA + 1] = r2
+							end
+						else
+							local ret_list = table_pack(
+								namecallHandler(kv, table_unpack(stack, callA + 1, callA + params))
+							)
 
-							table_move(ret_list, 2, ret_num + 1, callA, stack)
+							if ret_list[1] == true then
+								useFallback = false
+								pc += 1
+								dbg_pc = pc
+
+								local ret_num = ret_list.n - 1
+
+								if callC == 0 then
+									top = callA + ret_num - 1
+								else
+									ret_num = callC - 1
+								end
+
+								table_move(ret_list, 2, ret_num + 1, callA, stack)
+							end
 						end
 					end
 					
@@ -970,36 +998,60 @@ local function luau_load(module, env, luau_settings)
 
 					local params = if B == 0 then top - A else B - 1
 					local func = stack[A]
-					local ret_list = table_pack(
+
+					if C == 1 then
+						-- 0 return values expected
 						func(table_unpack(stack, A + 1, A + params))
-					)
-
-					local ret_num = ret_list.n
-
-					if C == 0 then
-						top = A + ret_num - 1
+					elseif C == 2 then
+						-- 1 return value expected
+						stack[A] = func(table_unpack(stack, A + 1, A + params))
+					elseif C == 3 then
+						-- 2 return values expected
+						stack[A], stack[A + 1] = func(table_unpack(stack, A + 1, A + params))
 					else
-						ret_num = C - 1
-					end
+						local ret_list = table_pack(
+							func(table_unpack(stack, A + 1, A + params))
+						)
 
-					table_move(ret_list, 1, ret_num, A, stack)
+						local ret_num = ret_list.n
+
+						if C == 0 then
+							top = A + ret_num - 1
+						else
+							ret_num = C - 1
+						end
+
+						table_move(ret_list, 1, ret_num, A, stack)
+					end
 				elseif op == 22 then --[[ RETURN ]]
 					if interruptHook then
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
 					local A = code_A[ipc]
-					local B = code_B[ipc] 
-					local b = B - 1
-					local nresults
+					local B = code_B[ipc]
 
-					if b == LUA_MULTRET then
-						nresults = top - A + 1
+					if B == 1 then
+						-- 0 return values
+						return
+					elseif B == 2 then
+						-- 1 return value
+						return stack[A]
+					elseif B == 3 then
+						-- 2 return values
+						return stack[A], stack[A + 1]
+					elseif B == 4 then
+						-- 3 return values
+						return stack[A], stack[A + 1], stack[A + 2]
 					else
-						nresults = B - 1
+						local nresults
+						if B == 0 then
+							nresults = top - A + 1
+						else
+							nresults = B - 1
+						end
+						return table_unpack(stack, A, A + nresults - 1)
 					end
-
-					return table_unpack(stack, A, A + nresults - 1)
 				elseif op == 23 then --[[ JUMP ]]
 					pc += code_D[ipc]
 				elseif op == 24 then --[[ JUMPBACK ]]
@@ -1441,8 +1493,11 @@ local function luau_load(module, env, luau_settings)
 					end
 				end
 
+				-- // Sync dbg_pc upvalue to debugging table for error diagnostics
+				debugging.pc = dbg_pc
+
 				local opname
-				local dbgpc = debugging.pc
+				local dbgpc = dbg_pc
 				if dbgpc and proto.code_op then
 					local opinfo = opList[(proto.code_op[dbgpc] or 0) + 1]
 					opname = opinfo and opinfo[1] or "UNKNOWN"
