@@ -1133,6 +1133,21 @@ getscripthash = function(script)
 	return response
 end
 
+decompile = function(script)
+	assert(typeof(script) == 'Instance' and script:IsA('LuaSourceContainer'), "invalid argument #1 to 'decompile' (LuaSourceContainer expected, got " .. typeof(script) .. ')', 2)
+
+	local bytecode = getscriptbytecode(script)
+	if not bytecode or #bytecode == 0 then
+		return nil, 'FunnyExecutor -- decompile: no bytecode for ' .. tostring(script)
+	end
+
+	local response = send_method('decompile', base64encode(bytecode))
+	if not response or response == 'fail' or response == '' then
+		return nil, 'FunnyExecutor -- decompile: request failed'
+	end
+	return response
+end
+
 -- clipboard
 
 setclipboard = function(content)
@@ -1207,7 +1222,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.375'
+	return 'FunnyExecutor', 'v0.385'
 end
 
 getexecutorname = function()

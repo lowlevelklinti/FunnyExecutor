@@ -1,6 +1,6 @@
 import FAPI
 scripts = {
-    'init': ['Workspace', 'ExtractThis']
+    'init': ['Workspace', 'BinSource']
 
 }
 sdk = FAPI.get_sdk()

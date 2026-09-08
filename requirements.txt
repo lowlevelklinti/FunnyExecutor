@@ -5,3 +5,4 @@ requests
 pyperclip
 psutil
 PySide6
+zstandard

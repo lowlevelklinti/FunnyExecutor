@@ -16,7 +16,8 @@ from shutil import rmtree
 import pydirectinput
 import psutil
 import pyperclip
-from .compiler import Luau
+import requests
+from .compiler import Luau, BytecodeError
 
 appdata = Path(os.environ['APPDATA'])
 parent = appdata / 'FunnyExecutor'
@@ -246,6 +247,12 @@ input_handlers = {
     'mousescroll': lambda a: pydirectinput.scroll(int(a[0])),
 }
 
+def decode_bytecode(bytecode: bytes) -> bytes:
+    try:
+        return Luau.decrypt_bytecode(bytecode)
+    except BytecodeError:
+        return bytecode
+
 def recv_method(method, args):
     create_workspace()
 
@@ -419,7 +426,7 @@ def recv_method(method, args):
             bytecode = script.get_authentic_bytecode()
             if not bytecode:
                 return b'nil'
-            return base64.b64encode(bytecode)
+            return base64.b64encode(decode_bytecode(bytecode))
         except Exception:
             return b'fail'
 
@@ -433,9 +440,22 @@ def recv_method(method, args):
             bytecode = script.get_authentic_bytecode()
             if not bytecode:
                 return b'nil'
-            return hashlib.sha256(bytecode).hexdigest().encode('ascii')
+            return hashlib.sha256(decode_bytecode(bytecode)).hexdigest().encode('ascii')
         except Exception:
             return b'fail'
+
+    elif method == 'decompile':
+        try:
+            r = requests.post(
+                'https://api.lua.expert/decompile',
+                json={'script': args[0].decode('ascii')},
+                timeout=30
+            )
+        except requests.RequestException:
+            return b'fail'
+        if r.status_code != 200:
+            return b'fail'
+        return r.content
 
     elif method == 'getinit':
         print('giving init')
