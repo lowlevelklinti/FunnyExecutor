@@ -65,8 +65,8 @@ class LuauHighlighter(QSyntaxHighlighter):
             'mouserel', 'mousemoverel', 'getmousepos', 'getmouselocation',
             'keyclick', 'keypress', 'keyrelease', 'iswindowactive', 'isrbxactive',
             'getscriptbytecode', 'dumpstring', 'getscripthash', 'Drawing',
-            'decompile',
-            'isrenderavailable', 'getrenderproperty', 'setrenderproperty'
+            'decompile', 'saveinstance', 'savegame'
+            'isrenderavailable', 'getrenderproperty', 'setrenderproperty',
         ]
         for word in unc_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")

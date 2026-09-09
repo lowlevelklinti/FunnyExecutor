@@ -1212,7 +1212,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.386'
+	return 'FunnyExecutor', 'v0.406'
 end
 
 getexecutorname = function()
@@ -2141,6 +2141,16 @@ isnetworkowner = function(part: BasePart)
 	end
 	return part.ReceiveAge == 0
 end
+
+-- saveinstance
+local _saveinstance = nil
+saveinstance = function(options) -- docs: https://luau.github.io/UniversalSynSaveInstance/api/SynSaveInstance/
+    options = options or {}
+    assert(type(options) == "table", "invalid argument #1 to 'saveinstance' (table expected, got " .. type(options) .. ") ", 2)
+    _saveinstance = _saveinstance or loadstring(game:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau", true), "saveinstance")()
+    return _saveinstance(options)
+end
+savegame = saveinstance
 
 firetouchinterest = function(part, otherPart, endTouched)
 	assert(typeof(part) == 'Instance', "invalid argument #1 to 'firetouchinterest' (BasePart expected, got " .. typeof(part) .. ')', 2)
