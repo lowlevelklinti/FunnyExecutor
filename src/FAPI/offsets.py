@@ -69,7 +69,6 @@ def update(version):
             }
         }
 
-        # optional, not every dump may carry it
         fps_cap = jf["FFlagOffsets"]["FFlags"].get("TaskSchedulerTargetFps")
         if fps_cap is not None:
             cache["offsets"]["fflag_task_scheduler_target_fps"] = fps_cap

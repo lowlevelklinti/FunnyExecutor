@@ -43,9 +43,6 @@ def is_blocked(path: Path) -> bool:
 workspace_root = parent / 'workspace'
 
 def resolve_path(raw: bytes):
-    """Resolve a script-supplied relative path inside the workspace sandbox.
-    Returns an absolute Path or None when the path escapes the sandbox
-    (absolute paths, drive letters, UNC shares, '..' traversal)."""
     try:
         rel = raw.decode('utf-8')
     except Exception:
@@ -65,7 +62,6 @@ def resolve_path(raw: bytes):
         return None
     return target
 
-# -- rconsole implementation (win32 console api) --
 
 _console_state = {'allocated': False}
 
@@ -116,7 +112,6 @@ def console_input() -> str:
     kernel32.ReadConsoleW(stdin, buf, 4095, ctypes.byref(read), None)
     return buf.value.rstrip('\r\n')
 
-# -- file dialogs (comdlg32 / shell32) --
 
 class OPENFILENAMEW(ctypes.Structure):
     _fields_ = [

@@ -77,10 +77,9 @@ local lz4 do
 		end
 
 		function Stream.append(self: Streamer, newData: string)
-			-- adds new data to the end of a stream
 			self.Source ..= newData
 			self.Length = string.len(self.Source)
-			self:seek(0) --hacky but forces a recalculation of the isFinished flag
+			self:seek(0)
 		end
 
 		function Stream.toEnd(self: Streamer)
@@ -111,7 +110,6 @@ local lz4 do
 					local next3 = iostream:read(3, false)
 
 					if string.len(next3) < 3 then
-						--push bytes to literal block then break
 						LiteralPushValue = nextByte .. next3
 						iostream:seek(3)
 					else
@@ -138,13 +136,11 @@ local lz4 do
 							if iostream.Length - iostream.Offset <= 5 then
 								LiteralPushValue = match
 								pushMatch = false
-								--better safe here, dont bother pushing to match ever
 							end
 
 							if pushMatch then
 								pushToLiteral = false
 
-								-- gets the position from the end of processed, then slaps it onto processed
 								local realPosition = string.len(processed) - matchPos
 								processed = processed .. match
 
@@ -185,12 +181,10 @@ local lz4 do
 		local function write(char)
 			output = output .. char
 		end
-		-- begin working through chunks
 		for chunkNum, chunk in blocks do
 			local litLen = chunk.LiteralLength
 			local matLen = (chunk.MatchLength or 4) - 4
 
-			-- create token
 			local tokenLit = math.clamp(litLen, 0, 15)
 			local tokenMat = math.clamp(matLen, 0, 15)
 
@@ -199,7 +193,6 @@ local lz4 do
 
 			if litLen >= 15 then
 				litLen = litLen - 15
-				--begin packing extra bytes
 				repeat
 					local nextToken = math.clamp(litLen, 0, 0xFF)
 					write(string.pack("<I1", nextToken))
@@ -209,14 +202,11 @@ local lz4 do
 				until nextToken < 0xFF
 			end
 
-			-- push raw lit data
 			write(chunk.Literal)
 
 			if chunkNum ~= #blocks then
-				-- push offset as u16
 				write(string.pack("<I2", chunk.MatchOffset))
 
-				-- pack extra match bytes
 				if matLen >= 15 then
 					matLen = matLen - 15
 
@@ -1222,7 +1212,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.385'
+	return 'FunnyExecutor', 'v0.386'
 end
 
 getexecutorname = function()
@@ -2411,7 +2401,7 @@ clonereference = cloneref
 
 game.StarterGui:SetCore("SendNotification", {
 	Title = "FAPI",
-	Text = "Attached",
+	Text = "Injected",
 	Duration = 5,
 })
 

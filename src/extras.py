@@ -94,7 +94,7 @@ class LuauHighlighter(QSyntaxHighlighter):
         self.rules.append((call_pattern, function_format))
 
         # func defs
-        def_pattern = QRegularExpression(r"(?<=\bfunction\s+)[a-zA-Z_][a-zA-Z0-9_]*\b")
+        def_pattern = QRegularExpression(r"\bfunction\s+\K[a-zA-Z_][a-zA-Z0-9_]*\b")
         self.rules.append((def_pattern, function_format))
 
         # strings

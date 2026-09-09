@@ -19,9 +19,6 @@ WINDOWS_RESERVED = {
 }
 
 def safe_chunkname(chunkname: str) -> str:
-    """Turn a chunkname into a legal single-component Windows file name.
-    compile.exe embeds the input file name as the chunk name, so compiling a
-    file literally named after the chunkname gives the chunk that source."""
     name = (chunkname or '').strip()
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     name = name.strip(' .') or 'chunk'
