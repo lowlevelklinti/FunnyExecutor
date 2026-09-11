@@ -158,10 +158,15 @@ def process_has_window(target_pid):
     return has_window
 
 def roblox_open():
-    ph = pymem.Pymem('RobloxPlayerBeta.exe').process_handle
-    if ph:
-        if sdk.get_hwnd(ph):
-            return True
-        else:
+    try:
+        if not check_process_by_name('RobloxPlayerBeta.exe'):
             return False
-    return False
+        ph = pymem.Pymem('RobloxPlayerBeta.exe').process_handle
+        if ph:
+            if sdk.get_hwnd(ph):
+                return True
+            else:
+                return False
+        return False
+    except:
+        return False

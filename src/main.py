@@ -3,6 +3,7 @@ import os.path
 import shutil
 import sys
 import time
+import threading
 import psutil
 
 from design import Ui_MainWindow
@@ -20,7 +21,11 @@ def load_exec():
     global executor
     global sdk
 
-    if not FAPI.roblox_open():
+    try:
+        if not FAPI.roblox_open():
+            unload_exec()
+            return
+    except:
         unload_exec()
         return
 
@@ -71,12 +76,16 @@ class Window(QMainWindow, Ui_MainWindow):
                 return
 
             self._injecting = True
-            try:
-                executor.inject()
-            except Exception as e:
-                print(e)
-            finally:
-                self._injecting = False
+
+            def worker():
+                try:
+                    executor.inject()
+                except Exception as e:
+                    print(e)
+                finally:
+                    self._injecting = False
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def inject():
             if executor:
@@ -114,12 +123,6 @@ class Window(QMainWindow, Ui_MainWindow):
             elif self._queued:
                 self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
                 check_and_inject()
-                if executor:
-                    try:
-                        if executor.injected:
-                            self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
-                    except:
-                        pass
             else:
                 self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
 
