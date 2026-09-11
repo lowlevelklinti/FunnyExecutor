@@ -34,9 +34,16 @@ class Roblox:
         offsets.check(self.version)
         self.offsets = offsets.get()
 
-        fakedm = self.mem.read_ulonglong(self.mem.base_address + self.offsets.fake_datamodel_ptr)
-        realdm = self.mem.read_ulonglong(fakedm + self.offsets.real_datamodel_ptr)
-        self.datamodel = Instance(self, realdm)
+    @property
+    def datamodel(self):
+        try:
+            fakedm = self.mem.read_ulonglong(self.mem.base_address + self.offsets.fake_datamodel_ptr)
+            realdm = self.mem.read_ulonglong(fakedm + self.offsets.real_datamodel_ptr)
+            if not realdm:
+                return None
+            return Instance(self, realdm)
+        except:
+            return None
 
     def from_class_name(self, x):
         x = Instance(self, x)
@@ -67,18 +74,18 @@ class Instance:
         self._rbx = rbx
 
     @property
-    def name(self):  # roblox changed how names work. now theyre in name containers
-        container = self.memory.read_ulonglong(self.address + self.offsets.ins_name_container)
-        ptr = container + self.offsets.ins_name
-
-        # first check if the container value is another pointer to prevent corrupted strings
-        try: return self.memory.read_string(self.memory.read_ulonglong(ptr))
-        except: pass
-
-        # if not, dont wrap it in a read_ulonglong
-        try: return self.memory.read_string(ptr)
-        except: pass
-
+    def name(self):
+        try:
+            if not self.address:
+                return None
+            container = self.memory.read_ulonglong(self.address + self.offsets.ins_name_container)
+            ptr = container + self.offsets.ins_name
+            try: return self.memory.read_string(self.memory.read_ulonglong(ptr))
+            except: pass
+            try: return self.memory.read_string(ptr)
+            except: pass
+        except:
+            pass
         return None
 
     @property
@@ -172,9 +179,11 @@ class Instance:
         loop(self)
         return l
 
-    def find(self, *path):  # alternative to Instance.Child1.Child2...
+    def find(self, *path):
         current = self
         for i in path:
+            if not current:
+                return None
             current = current.find_first_child(i)
             if not current:
                 return None

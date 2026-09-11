@@ -1,3 +1,4 @@
+import time
 import pymem
 from . import sdk, bridge
 from .compiler import Luau
@@ -23,71 +24,92 @@ class Executor:
         self.sdk: sdk.Roblox = rbx if rbx else get_sdk()
         bridge.set_sdk(self.sdk)
         self.strval = None
+        self._injecting = False
+        self._last_inject = 0.0
 
     @property
     def injected(self):
         try:
-            if self.sdk.datamodel.name != "Ugc":
+            dm = self.sdk.datamodel
+            if not dm or dm.name != "Ugc":
                 return False
+            if not psutil.pid_exists(self.sdk.mem.process_id):
+                return False
+            return dm.find('CoreGui', '_funnyexecutor') is not None
         except:
             return False
 
-        if not psutil.pid_exists(self.sdk.mem.process_id):
-            return False
-
-        return self.sdk.datamodel.find('CoreGui', '_funnyexecutor') is not None
-
     def inject(self):
+        if self._injecting:
+            return
         if self.injected:
             print("Skipping injection, root folder already exists.")
             return
+        if time.time() - self._last_inject < 1.0:
+            return
 
-        print('--- INJECTING ---')
-        if not psutil.pid_exists(self.sdk.mem.process_id):
-            self.sdk = get_sdk()
+        self._injecting = True
+        try:
+            print('Injecting')
+            if not psutil.pid_exists(self.sdk.mem.process_id):
+                self.sdk = get_sdk()
 
-        rbx = self.sdk
-        game = rbx.datamodel
+            rbx = self.sdk
+            game = rbx.datamodel
+            if not game:
+                return
 
-        hwnd = sdk.get_hwnd(rbx.mem.process_handle)[0]
+            hwnds = sdk.get_hwnd(rbx.mem.process_handle)
+            if not hwnds:
+                return
+            hwnd = hwnds[0]
 
-        print("Client HWND:", hex(hwnd), '\n')
+            print("Client HWND:", hex(hwnd), '\n')
 
-        plm = game.find('CoreGui', 'RobloxGui', 'Modules', 'PlayerList', 'PlayerListManager')
+            plm = game.find('CoreGui', 'RobloxGui', 'Modules', 'PlayerList', 'PlayerListManager')
+            if not plm:
+                return
 
-        print('got PlayerListManager:', hex(plm.address))
+            print('got PlayerListManager:', hex(plm.address))
 
-        EnableLoadModule = rbx.offsets.fflag_enable_load_module
-        addr = rbx.mem.base_address + EnableLoadModule
+            EnableLoadModule = rbx.offsets.fflag_enable_load_module
+            addr = rbx.mem.base_address + EnableLoadModule
 
-        print('got EnableLoadModule:', hex(addr))
+            print('got EnableLoadModule:', hex(addr))
 
-        rbx.mem.write_bool(addr, True)
-        rbx.mem.write_int(plm.address + 0x170, 0)
+            rbx.mem.write_bool(addr, True)
+            rbx.mem.write_int(plm.address + 0x170, 0)
 
-        print('set PlayerListManager.ModuleState to 0')
+            print('set PlayerListManager.ModuleState to 0')
 
-        with open(luau_modules / 'init.bin', 'rb') as f:
-            bytecode = f.read()
-        print(bytecode)
+            with open(luau_modules / 'init.bin', 'rb') as f:
+                bytecode = f.read()
+            print(bytecode)
 
-        revert = plm.exploit(bytecode)
+            revert = plm.exploit(bytecode)
 
-        print('replace bytecode in Jest', '\n')
+            print('replace bytecode in Jest', '\n')
 
-        oldfg = win32gui.GetForegroundWindow()
-        win32gui.SetForegroundWindow(hwnd)
-        pydirectinput.press('esc')
+            oldfg = win32gui.GetForegroundWindow()
+            win32gui.SetForegroundWindow(hwnd)
+            pydirectinput.press('esc')
+            revert()
+            pydirectinput.press('esc')
+            if oldfg and oldfg != hwnd:
+                win32gui.SetForegroundWindow(oldfg)
 
-        print('sent escape key (triggered plm)', '\n')
-        revert()
+            print('reverted bytecode replacement', '\n')
+            print('Injected')
 
-        pydirectinput.press('esc')
-        win32gui.SetForegroundWindow(oldfg)
+            self._last_inject = time.time()
 
-        print('reverted bytecode replacement', '\n')
-
-        print('Injected')
+            finish = time.time() + 1.5
+            while time.time() < finish:
+                if self.injected:
+                    break
+                time.sleep(0.02)
+        finally:
+            self._injecting = False
 
     def execute(self, source: str | bytes):
         if not self.injected:

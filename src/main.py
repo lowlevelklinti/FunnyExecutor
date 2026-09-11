@@ -2,6 +2,8 @@ import json
 import os.path
 import shutil
 import sys
+import time
+import psutil
 
 from design import Ui_MainWindow
 
@@ -18,9 +20,22 @@ def load_exec():
     global executor
     global sdk
 
-    if FAPI.roblox_open():
+    if not FAPI.roblox_open():
+        unload_exec()
+        return
+
+    if executor is not None and sdk is not None:
+        try:
+            if psutil.pid_exists(sdk.mem.process_id):
+                return
+        except:
+            pass
+
+    try:
         executor = FAPI.Executor()
         sdk = executor.sdk
+    except:
+        unload_exec()
 
 def unload_exec():
     global executor
@@ -35,30 +50,46 @@ class Window(QMainWindow, Ui_MainWindow):
 
         self._injecting = False
         self._warned = False
+        self._queued = False
 
-        def inject():
+        def check_and_inject():
+            if not self._queued or self._injecting:
+                return
+
+            load_exec()
+
+            if not executor or not sdk:
+                return
+
             try:
-                load_exec()
+                if executor.injected:
+                    return
+                dm = sdk.datamodel
+                if not dm or dm.name != 'Ugc':
+                    return
             except:
-                unload_exec()
-
-            if not executor:
-                MessageBox.warning("Injection failed", "You must have Roblox open to inject")
-                return
-
-            if sdk.datamodel.name != 'Ugc':
-                print(sdk.datamodel.name)
-                MessageBox.warning("Injection failed", "You must be in-game to inject")
-                return
-            if executor.injected:
-                MessageBox.information("Injection failed", "Already injected")
-                return
-            if self._injecting:
                 return
 
             self._injecting = True
-            executor.inject()
-            self._injecting = False
+            try:
+                executor.inject()
+            except Exception as e:
+                print(e)
+            finally:
+                self._injecting = False
+
+        def inject():
+            if executor:
+                try:
+                    if executor.injected:
+                        MessageBox.information("Injection failed", "Already injected")
+                        return
+                except:
+                    pass
+
+            self._queued = True
+            check_and_inject()
+            update_status()
 
         def execute():
             if not executor or not executor.injected:
@@ -69,11 +100,26 @@ class Window(QMainWindow, Ui_MainWindow):
             executor.execute(script)
 
         def update_status():
+            load_exec()
+
+            is_injected = False
             if executor:
-                if executor.injected:
-                    self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
-                else:
-                    self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
+                try:
+                    is_injected = executor.injected
+                except:
+                    is_injected = False
+
+            if is_injected:
+                self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
+            elif self._queued:
+                self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
+                check_and_inject()
+                if executor:
+                    try:
+                        if executor.injected:
+                            self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
+                    except:
+                        pass
             else:
                 self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
 
@@ -155,7 +201,7 @@ class Window(QMainWindow, Ui_MainWindow):
 
         timer_update = QTimer(self)
         timer_update.timeout.connect(update_status)
-        timer_update.start(1000)
+        timer_update.start(250)
 
         timer_autosave = QTimer(self)
         timer_autosave.timeout.connect(self._save_tabs)
