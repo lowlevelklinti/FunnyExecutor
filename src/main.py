@@ -56,6 +56,7 @@ class Window(QMainWindow, Ui_MainWindow):
         self._injecting = False
         self._warned = False
         self._queued = False
+        self._last_inject_try = 0
 
         def check_and_inject():
             if not self._queued or self._injecting:
@@ -70,11 +71,20 @@ class Window(QMainWindow, Ui_MainWindow):
                 if executor.injected:
                     return
                 dm = sdk.datamodel
-                if not dm or dm.name != 'Ugc':
+                if not dm or dm.name != 'Ugc' or not dm.address:
+                    return
+                if dm.address in executor._handled_dms:
+                    return
+                players = dm.find_first_child('Players')
+                if not players or not players.get_children():
                     return
             except:
                 return
 
+            if time.time() - self._last_inject_try < 1.0:
+                return
+
+            self._last_inject_try = time.time()
             self._injecting = True
 
             def worker():

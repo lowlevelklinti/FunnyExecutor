@@ -1212,7 +1212,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.417'
+	return 'FunnyExecutor', 'v0.427'
 end
 
 getexecutorname = function()
@@ -2409,13 +2409,25 @@ clonereference = cloneref
 
 -- main loop
 
-game.StarterGui:SetCore("SendNotification", {
-	Title = "FAPI",
-	Text = "Injected",
-	Duration = 5,
-})
+task.spawn(function()
+	local ok, notify_action = pcall(send_method, 'client_init')
+	if ok and notify_action == 'notify' then
+		local starterGui = game:GetService("StarterGui")
+		for i = 1, 15 do
+			local sent = pcall(function()
+				starterGui:SetCore("SendNotification", {
+					Title = "FAPI",
+					Text = "Injected",
+					Duration = 5,
+				})
+			end)
+			if sent then break end
+			task.wait(0.5)
+		end
+	end
+end)
 
-flush_teleport_queue()
+pcall(flush_teleport_queue)
 
 task.spawn(function()
 	while task.wait() do

@@ -1,4 +1,5 @@
 import time
+import ctypes
 import pymem
 from . import sdk, bridge
 from .compiler import Luau
@@ -14,6 +15,31 @@ parent = Path(__file__).resolve().parent
 luau_modules = parent / 'luau'
 bridge.start_bridge()
 
+def force_foreground(hwnd):
+    try:
+        fore_hwnd = win32gui.GetForegroundWindow()
+        if fore_hwnd == hwnd:
+            return True
+        fore_thread, _ = win32process.GetWindowThreadProcessId(fore_hwnd)
+        curr_thread = win32process.GetCurrentThreadId()
+        if fore_thread != curr_thread:
+            ctypes.windll.user32.AttachThreadInput(curr_thread, fore_thread, True)
+            ctypes.windll.user32.BringWindowToTop(hwnd)
+            ctypes.windll.user32.ShowWindow(hwnd, 5)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.AttachThreadInput(curr_thread, fore_thread, False)
+        else:
+            ctypes.windll.user32.BringWindowToTop(hwnd)
+            ctypes.windll.user32.ShowWindow(hwnd, 5)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        return True
+    except:
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except:
+            pass
+        return False
+
 class ExecutionError(Exception): pass
 
 class Executor:
@@ -25,7 +51,7 @@ class Executor:
         bridge.set_sdk(self.sdk)
         self.strval = None
         self._injecting = False
-        self._last_inject = 0.0
+        self._handled_dms = set()
 
     @property
     def injected(self):
@@ -35,6 +61,8 @@ class Executor:
                 return False
             if not psutil.pid_exists(self.sdk.mem.process_id):
                 return False
+            if bridge.is_dm_confirmed(dm.address):
+                return True
             return dm.find('CoreGui', '_funnyexecutor') is not None
         except:
             return False
@@ -45,7 +73,16 @@ class Executor:
         if self.injected:
             print("Skipping injection, root folder already exists.")
             return
-        if time.time() - self._last_inject < 1.0:
+
+        dm = self.sdk.datamodel
+        if not dm or dm.name != "Ugc" or not dm.address:
+            return
+
+        if dm.address in self._handled_dms:
+            return
+
+        players = dm.find_first_child('Players')
+        if not players or not players.get_children():
             return
 
         self._injecting = True
@@ -53,6 +90,7 @@ class Executor:
             print('Injecting')
             if not psutil.pid_exists(self.sdk.mem.process_id):
                 self.sdk = get_sdk()
+                bridge.set_sdk(self.sdk)
 
             rbx = self.sdk
             game = rbx.datamodel
@@ -90,24 +128,31 @@ class Executor:
 
             print('replace bytecode in Jest', '\n')
 
+            bridge.init_received_event.clear()
+
             oldfg = win32gui.GetForegroundWindow()
-            win32gui.SetForegroundWindow(hwnd)
+            force_foreground(hwnd)
+            time.sleep(0.05)
+
             pydirectinput.press('esc')
+            bridge.init_received_event.wait(timeout=0.6)
+            time.sleep(0.05)
             revert()
             pydirectinput.press('esc')
             if oldfg and oldfg != hwnd:
-                win32gui.SetForegroundWindow(oldfg)
+                force_foreground(oldfg)
 
             print('reverted bytecode replacement', '\n')
-            print('Injected')
 
-            self._last_inject = time.time()
-
-            finish = time.time() + 1.5
+            finish = time.time() + 2.0
             while time.time() < finish:
                 if self.injected:
                     break
                 time.sleep(0.02)
+
+            if self.injected:
+                self._handled_dms.add(dm.address)
+                print('Injected')
         finally:
             self._injecting = False
 

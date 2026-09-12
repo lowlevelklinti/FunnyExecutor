@@ -8,7 +8,9 @@ import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler
 import socketserver
-from threading import Thread
+from threading import Thread, Event
+
+init_received_event = Event()
 import os
 from pathlib import Path, PureWindowsPath
 from shutil import rmtree
@@ -453,15 +455,38 @@ def recv_method(method, args):
         return r.content
 
     elif method == 'getinit':
+        init_received_event.set()
         print('giving init')
         with open(old_parent / 'luau' / 'init.luau', 'rb') as f:
             source = f.read()
         return base64.b64encode(Luau.compile(source))
 
     elif method == 'getinitraw':
+        init_received_event.set()
         with open(old_parent / 'luau' / 'init.luau', 'rb') as f:
             source = f.read()
         return Luau.compile(source)
+
+    elif method == 'client_init':
+        pid = None
+        if _sdk is not None:
+            try:
+                pid = _sdk.mem.process_id
+                dm = _sdk.datamodel
+                if dm and dm.address:
+                    _confirmed_dms.add(dm.address)
+            except:
+                pass
+
+        if pid is not None:
+            global _notified_pids
+            _notified_pids = {p for p in _notified_pids if psutil.pid_exists(p)}
+            if pid not in _notified_pids:
+                _notified_pids.add(pid)
+                return b'notify'
+            else:
+                return b'silent'
+        return b'notify'
 
     # file api
 
@@ -597,6 +622,11 @@ def set_source(source: bytes):
     _target_source = source
 
 _sdk = None
+_notified_pids = set()
+_confirmed_dms = set()
+
+def is_dm_confirmed(dm_addr):
+    return dm_addr in _confirmed_dms
 
 def set_sdk(sdk):
     global _sdk
