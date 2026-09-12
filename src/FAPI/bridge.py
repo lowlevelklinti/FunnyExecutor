@@ -4,11 +4,14 @@ import ctypes.wintypes
 import hashlib
 import hmac as hmac_mod
 import json
+import queue as queue_mod
 import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler
 import socketserver
-from threading import Thread, Event
+from threading import Thread, Event, Lock
+
+from websocket import create_connection, WebSocketConnectionClosedException
 
 init_received_event = Event()
 import os
@@ -488,6 +491,86 @@ def recv_method(method, args):
                 return b'silent'
         return b'notify'
 
+    elif method == 'websocket_connect':
+        try:
+            url = base64.b64decode(args[0]).decode('utf-8')
+        except Exception:
+            return b'fail'
+        if not url.startswith(('ws://', 'wss://')):
+            return b'fail'
+        ws_id = _ws_next_id()
+        _ws_pool[ws_id] = {
+            'status': 'connecting',
+            'url': url,
+            'socket': None,
+            'events': queue_mod.Queue(),
+            'pending': [],
+        }
+        Thread(target=_ws_worker, args=(ws_id, url), daemon=True).start()
+        return str(ws_id).encode('ascii')
+
+    elif method == 'websocket_send':
+        try:
+            ws_id = int(args[0])
+            data = base64.b64decode(args[1]).decode('utf-8', 'replace')
+        except Exception:
+            return b'fail'
+        entry = _ws_pool.get(ws_id)
+        if not entry:
+            return b'fail'
+        if entry['status'] == 'connecting':
+            entry['pending'].append(data)
+            return b'ok'
+        if entry['status'] != 'open' or not entry['socket']:
+            return b'fail'
+        try:
+            entry['socket'].send(data)
+        except Exception:
+            return b'fail'
+        return b'ok'
+
+    elif method == 'websocket_poll':
+        try:
+            ws_id = int(args[0])
+        except Exception:
+            return b'[]'
+        entry = _ws_pool.get(ws_id)
+        if not entry:
+            return b'[]'
+        events = []
+        while True:
+            try:
+                kind, data = entry['events'].get_nowait()
+            except queue_mod.Empty:
+                break
+            if kind == 'open':
+                events.append({'t': 'open'})
+            elif kind == 'message':
+                events.append({
+                    't': 'message',
+                    'd': base64.b64encode(data.encode('utf-8', 'replace')).decode('ascii'),
+                })
+            elif kind == 'close':
+                events.append({'t': 'close', 'c': data[0], 'r': data[1]})
+        return json.dumps(events).encode('utf-8')
+
+    elif method == 'websocket_close':
+        try:
+            ws_id = int(args[0])
+        except Exception:
+            return b'fail'
+        entry = _ws_pool.get(ws_id)
+        if not entry:
+            return b'fail'
+        entry['status'] = 'closed'
+        socket = entry.get('socket')
+        if socket:
+            try:
+                socket.close()
+            except Exception:
+                pass
+        return b'ok'
+
     # file api
 
     if not path:
@@ -576,6 +659,87 @@ def recv_method(method, args):
         return b'\n'.join(l)
 
     return b'bad request'
+
+_ws_pool = {}
+_ws_counter = 0
+_ws_lock = Lock()
+
+def _ws_next_id():
+    global _ws_counter
+    with _ws_lock:
+        _ws_counter += 1
+        return _ws_counter
+
+def _ws_parse_close(payload):
+    code = 1006
+    reason = ''
+    if payload and len(payload) >= 2:
+        code = int.from_bytes(payload[:2], 'big')
+        if len(payload) > 2:
+            reason = payload[2:].decode('utf-8', 'replace')
+    return code, reason
+
+def _ws_close_info(socket, payload=None):
+    if payload:
+        return _ws_parse_close(payload)
+    status = getattr(socket, 'close_status', None)
+    reason = getattr(socket, 'close_reason', '') or ''
+    return (status or 1006), reason
+
+def _ws_worker(ws_id, url):
+    entry = _ws_pool.get(ws_id)
+    if entry is None:
+        return
+
+    try:
+        socket = create_connection(url, timeout=30, enable_multithread=True)
+    except Exception as e:
+        entry['status'] = 'closed'
+        entry['events'].put(('close', (1006, str(e))))
+        return
+
+    entry['socket'] = socket
+    entry['status'] = 'open'
+    for msg in entry['pending']:
+        try:
+            socket.send(msg)
+        except Exception:
+            pass
+    entry['pending'].clear()
+    entry['events'].put(('open', None))
+
+    while True:
+        if entry['status'] == 'closed':
+            break
+        try:
+            opcode, frame = socket.recv_data(control_frame=True)
+        except WebSocketConnectionClosedException:
+            entry['status'] = 'closed'
+            code, reason = _ws_close_info(socket)
+            entry['events'].put(('close', (code, reason)))
+            break
+        except Exception as e:
+            entry['status'] = 'closed'
+            entry['events'].put(('close', (1006, str(e))))
+            break
+
+        if opcode == 0x1:  # text
+            try:
+                text = frame.decode('utf-8', 'replace') if isinstance(frame, bytes) else str(frame)
+            except Exception:
+                text = ''
+            entry['events'].put(('message', text))
+        elif opcode == 0x2:  # binary
+            try:
+                text = frame.decode('utf-8', 'replace') if isinstance(frame, bytes) else str(frame)
+            except Exception:
+                text = ''
+            entry['events'].put(('message', text))
+        elif opcode == 0x8:  # close
+            entry['status'] = 'closed'
+            code, reason = _ws_close_info(socket, frame)
+            entry['events'].put(('close', (code, reason)))
+            break
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args) -> None:
