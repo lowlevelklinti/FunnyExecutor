@@ -98,6 +98,15 @@ class Window(QMainWindow, Ui_MainWindow):
             threading.Thread(target=worker, daemon=True).start()
 
         def inject():
+            load_exec()
+            try:
+                if not FAPI.roblox_open():
+                    MessageBox.warning("Injection failed", "You must have Roblox open to inject")
+                    return
+            except:
+                MessageBox.warning("Injection failed", "You must have Roblox open to inject")
+                return
+
             if executor:
                 try:
                     if executor.injected:
@@ -120,6 +129,12 @@ class Window(QMainWindow, Ui_MainWindow):
 
         def update_status():
             load_exec()
+
+            try:
+                if not FAPI.roblox_open():
+                    self._queued = False
+            except:
+                self._queued = False
 
             is_injected = False
             if executor:
