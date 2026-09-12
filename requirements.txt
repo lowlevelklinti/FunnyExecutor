@@ -6,3 +6,4 @@ pyperclip
 psutil
 PySide6
 zstandard
+websocket-client

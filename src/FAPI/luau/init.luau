@@ -2283,6 +2283,98 @@ function Signal.new()
 	return signal
 end
 
+-- WebSocket (client only)
+
+WebSocket = {}
+
+function WebSocket.connect(url)
+	assert(type(url) == 'string', "invalid argument #1 to 'WebSocket.connect' (string expected, got " .. type(url) .. ')', 2)
+	if not url:match('^ws://') and not url:match('^wss://') then
+		error("invalid argument #1 to 'WebSocket.connect' (invalid URL '" .. tostring(url) .. "', must start with ws:// or wss://)", 2)
+	end
+
+	local response = send_method('websocket_connect', base64encode(url))
+	if not response or response == 'fail' then
+		return nil, 'FunnyExecutor -- WebSocket.connect: failed to connect to ' .. tostring(url)
+	end
+
+	local id = tonumber(response)
+	if not id then
+		return nil, 'FunnyExecutor -- WebSocket.connect: invalid bridge response'
+	end
+
+	local connection = {
+		id = id,
+		closed = false,
+		OnMessage = Signal.new(),
+		OnClose = Signal.new(),
+	}
+
+	local proxy = newproxy(true)
+	local meta = getmetatable(proxy)
+
+	meta.__index = function(_, key)
+		if key == 'OnMessage' then
+			return connection.OnMessage
+		elseif key == 'OnClose' then
+			return connection.OnClose
+		elseif key == 'Send' then
+			return function(_, message)
+				assert(type(message) == 'string', "invalid argument #1 to 'Send' (string expected, got " .. type(message) .. ')', 2)
+				if connection.closed then
+					return false
+				end
+				local resp = send_method('websocket_send', tostring(connection.id), base64encode(message))
+				return resp == 'ok'
+			end
+		elseif key == 'Close' then
+			return function()
+				if connection.closed then
+					return
+				end
+				connection.closed = true
+				send_method('websocket_close', tostring(connection.id))
+			end
+		end
+		error(tostring(key) .. ' is not a valid member of WebSocket', 2)
+	end
+
+	meta.__tostring = function()
+		return 'WebSocket'
+	end
+
+	task.spawn(function()
+		while not connection.closed do
+			local response = send_method('websocket_poll', tostring(connection.id))
+			if response and response ~= '' and response ~= '[]' then
+				local ok, events = pcall(function()
+					return http:JSONDecode(response)
+				end)
+				if ok and type(events) == 'table' then
+					for _, ev in ipairs(events) do
+						if type(ev) == 'table' then
+							if ev.t == 'message' then
+								local okd, message = pcall(base64decode, ev.d or '')
+								if okd then
+									connection.OnMessage:Fire(message)
+								end
+							elseif ev.t == 'close' then
+								connection.closed = true
+								connection.OnClose:Fire()
+							end
+						end
+					end
+				end
+			end
+			if not connection.closed then
+				task.wait(0.05)
+			end
+		end
+	end)
+
+	return proxy
+end
+
 local function rconsole_bridge(method, text)
 	local response = send_method(method, base64encode(tostring(text)))
 	if response ~= 'ok' then

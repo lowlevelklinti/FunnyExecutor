@@ -65,7 +65,7 @@ class LuauHighlighter(QSyntaxHighlighter):
             'mouserel', 'mousemoverel', 'getmousepos', 'getmouselocation',
             'keyclick', 'keypress', 'keyrelease', 'iswindowactive', 'isrbxactive',
             'getscriptbytecode', 'dumpstring', 'getscripthash', 'Drawing',
-            'decompile', 'saveinstance', 'savegame'
+            'WebSocket', 'decompile', 'saveinstance', 'savegame'
             'isrenderavailable', 'getrenderproperty', 'setrenderproperty',
         ]
         for word in unc_keywords:

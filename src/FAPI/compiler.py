@@ -37,9 +37,13 @@ class Luau:
                 result = subprocess.run(
                     [parent/'luau'/'compile.exe', name, '--binary'],
                     capture_output=True,
-                    check=True,
                     cwd=tmpdir
                 )
+                if result.returncode != 0:
+                    raise BytecodeError(
+                        'Luau compile error:\n'
+                        + result.stderr.decode('utf-8', 'replace').strip()
+                    )
             return result.stdout
 
         path = tempfile.gettempdir() + f'\\FunnyExecutor-Temp-Source-{os.getpid()}-{time.time_ns()}.luau'
@@ -48,9 +52,13 @@ class Luau:
             Luau._write_source(path, source)
             result = subprocess.run(
                 [parent/'luau'/'compile.exe', path, '--binary'],
-                capture_output=True,
-                check=True
+                capture_output=True
             )
+            if result.returncode != 0:
+                raise BytecodeError(
+                    'Luau compile error:\n'
+                    + result.stderr.decode('utf-8', 'replace').strip()
+                )
         finally:
             try:
                 os.remove(path)
