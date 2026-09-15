@@ -1,4 +1,4 @@
-<img width="1920" height="1010" alt="{8AC10F7A-E997-4E93-A9D2-576A72A04F9A}" src="https://github.com/user-attachments/assets/892e866f-1856-459a-a3e6-e6342a06abe3" /># 🎭 Funny Executor
+# 🎭 Funny Executor
 
 > A lightweight and simple Roblox executor.
 
