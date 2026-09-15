@@ -1,14 +1,33 @@
-# Funny Executor
-A Lightweight and simple roblox executor.
+# 🎭 Funny Executor
 
-Unc: 66%
-Myriad General Validity Test  STATUS: 59% (MVT)
+> A lightweight and simple Roblox executor.
 
-# DISCLAIMER: 
-`
-WE DO NOT CONDONE USAGE OF MALICIOUS ROBLOX SCRIPTS USING ROBLOX "EXECUTORS", THIS IS SIMPLY FOR ENTERTAINMENT AND EDUCATIONAL PURPOSES ONLY.
-CURRENT METHOD IS **UD**, BUT YOU MAY GET BANNED IN A ROBLOX BAN WAVE.
-USE AT YOUR OWN RISK <3`
+## 📊 Status
 
-## DONATE:
-- BTC: `0x52ef074a0fb46e9c6c675b646aaed154b360d26a`
+| Test                                   | Result |
+| -------------------------------------- | -----: |
+| **UNC**                                |    66% |
+| **Myriad General Validity Test (MVT)** |    59% |
+
+---
+
+##  Disclaimer
+
+> **Important:** We do not condone the use of malicious Roblox scripts or abuse of Roblox executors.
+>
+> This project is provided **for entertainment and educational purposes only**.
+>
+> The current method is **UD**. However, using executors may result in a ban during a Roblox ban wave.
+>
+> **Use at your own risk. ❤️**
+
+---
+
+## 💖 Support
+
+If you'd like to support the project:
+
+**BTC:**
+`0x52ef074a0fb46e9c6c675b646aaed154b360d26a`
+---
+
