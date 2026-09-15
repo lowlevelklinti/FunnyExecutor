@@ -364,8 +364,8 @@ end
 
 local genv_table = {}
 
-getgenv = function()
-	return genv_table
+getgenv = function(layer)
+	return getfenv(layer)
 end
 
 do
@@ -673,6 +673,90 @@ local b64_lookup = {}
 for i = 1, #b64_alphabet do
 	b64_lookup[string.byte(b64_alphabet, i)] = i - 1
 end
+
+-- imvast
+hookfunction = function(func, rep)
+	for i,v in pairs(getfenv()) do
+		if v == func then
+			getfenv()[i] = rep
+		end
+	end
+end
+
+local ssbs = {}
+local hiddenProperties = {}
+
+function isscriptable(object, property)
+    if object and typeof(object) == 'Instance' then
+        local s, r = pcall(function()
+            return ssbs[object][property]
+        end)
+        if s and r ~= nil then
+            return r
+        end
+        local s, r = pcall(function()
+            return object[property] ~= nil
+        end)
+        return s and r
+    end
+    return false
+end
+
+function setscriptable(object, property, bool)
+    if object and typeof(object) == 'Instance' and property then
+        local scriptable = isscriptable(object, property)
+        local s = pcall(function()
+            ssbs[object][property] = bool
+        end)
+        if not s then
+            ssbs[object] = {[property] = bool}
+        end
+        return scriptable
+    end
+end
+
+function gethiddenproperty(instance, property)
+    assert(typeof(instance) == "Instance", "invalid argument #1 to 'gethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2)
+    assert(type(property) == "string", "invalid argument #2 to 'gethiddenproperty' (string expected, got " .. type(property) .. ") ", 2)
+    
+    local success, value = pcall(function()
+        return instance[property]
+    end)
+    
+    if success then
+        return value, false
+    end
+    
+    if property == "size_xml" and instance:IsA("Fire") then
+        return hiddenProperties[instance] and hiddenProperties[instance][property] or 5, true
+    end
+    
+    error("Unable to get hidden property '" .. property .. "' from " .. instance.ClassName, 2)
+end
+
+function sethiddenproperty(instance, property, value)
+    assert(typeof(instance) == "Instance", "invalid argument #1 to 'sethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2) 
+    assert(type(property) == "string", "invalid argument #2 to 'sethiddenproperty' (string expected, got " .. type(property) .. ") ", 2)
+    
+    if property == "size_xml" and instance:IsA("Fire") then
+        if not hiddenProperties[instance] then
+            hiddenProperties[instance] = {}
+        end
+        hiddenProperties[instance][property] = value
+        return true
+    end
+    
+    local success = pcall(function()
+        instance[property] = value
+    end)
+    
+    if success then
+        return false
+    end
+    
+    error("Unable to set hidden property '" .. property .. "' on " .. instance.ClassName, 2)
+end
+--
 
 function base64encode(data)
 	local len = #data
@@ -1946,6 +2030,7 @@ getscripts = function()
 	end
 	return result
 end
+
 
 getrunningscripts = function()
 	local result = {}
