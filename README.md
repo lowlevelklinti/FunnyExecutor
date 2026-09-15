@@ -25,9 +25,16 @@
 
 ## 💖 Support
 
-If you'd like to support the project:
+### 💰 Project Donations
+
+If you'd like to support **Funny Executor**, you can donate using the official project BTC address:
 
 **BTC:**
 `0x52ef074a0fb46e9c6c675b646aaed154b360d26a`
+
 ---
 
+### 👤 Contributor — `nowsse`
+* 💬 **Telegram:** [@x4d4w](https://t.me/x4d4w)
+* 💙 **Discord:** `cblpokw`
+---
