@@ -7,7 +7,7 @@
 | Test                                   | Result |
 | -------------------------------------- | -----: |
 | **UNC**                                |    66% |
-| **Myriad General Validity Test (MVT)** |    59% |
+| **Myriad General Validity Test ** |    59% |
 
 ---
 
