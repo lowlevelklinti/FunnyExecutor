@@ -64,7 +64,7 @@ class LuauHighlighter(QSyntaxHighlighter):
             'task', 'coroutine', 'os', 'debug', 'utf8', 'bit32', 'buffer',
             'tick', 'wait', 'spawn', 'delay', 'elapsedTime',
             'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal', 'rawlen',
-            'unpack', 'xpcall', 'request', 'collectgarbage', 'self',
+            'unpack', 'xpcall', 'collectgarbage', 'self',
         ]
         for word in self.globals_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
