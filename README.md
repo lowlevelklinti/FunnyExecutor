@@ -1,4 +1,4 @@
-# Funny Executor
+# Funny Executor [Discord](https://discord.gg/fmTJvVmnA2)
 
 > A lightweight and simple Roblox executor.
 
@@ -42,5 +42,4 @@ If you'd like to support **Funny Executor**, you can donate using the official p
 
 ### 👤 Contributor — `nowsse`
 * 💬 **Telegram:** [@x4d4w](https://t.me/x4d4w)
-* 💙 **Discord:** `cblpokw`
 ---
