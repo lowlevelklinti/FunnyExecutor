@@ -20,6 +20,9 @@ class LuauHighlighter(QSyntaxHighlighter):
     _re_for_num = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s*=")
     _re_assign_target = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
     _re_identifier = re.compile(r"\b[A-Za-z_]\w*\b")
+    _re_table_key = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
+    _re_func_call = re.compile(r"\b([A-Za-z_]\w*)\s*(?=[\({\"'])")
+    _re_global_func = re.compile(r"(?<!\blocal\s)(?<!\blocal\s{2})(?<!\blocal\s{3})\bfunction\s+([A-Za-z_]\w*)")
 
     def __init__(self, document):
         super().__init__(document)
@@ -93,6 +96,13 @@ class LuauHighlighter(QSyntaxHighlighter):
             'getscriptbytecode', 'dumpstring', 'getscripthash', 'Drawing',
             'WebSocket', 'decompile', 'saveinstance', 'savegame',
             'isrenderavailable', 'getrenderproperty', 'setrenderproperty',
+            'request', 'syn', 'http', 'Signal',
+            'openfiledialog', 'savefiledialog', 'openfolderdialog', 'openfilesdialog',
+            'firetouchinterest', 'fireproximityprompt', 'fireclickdetector',
+            'getconnections', 'hookfunction', 'hookmetamethod',
+            'getrawmetatable', 'setrawmetatable', 'checkcaller',
+            'getcallingscript', 'getinstances', 'gethiddenproperty', 'sethiddenproperty',
+            'setsimulationradius', 'isscriptable', 'setscriptable',
         ]
         for word in self.unc_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
@@ -146,6 +156,39 @@ class LuauHighlighter(QSyntaxHighlighter):
             set(self.globals_keywords) | set(self.unc_keywords)
         self._last_revision = None
         self.undefined_ranges = []
+        self.unused_ranges = []
+
+    def _find_table_key_positions(self, text):
+        key_positions = set()
+        brace_depth = 0
+        brace_starts = []
+        for i, ch in enumerate(text):
+            if ch == '{':
+                brace_depth += 1
+                brace_starts.append(i)
+            elif ch == '}':
+                if brace_depth > 0:
+                    brace_depth -= 1
+                    brace_starts.pop()
+
+        brace_ranges = []
+        stack = []
+        for i, ch in enumerate(text):
+            if ch == '{':
+                stack.append(i)
+            elif ch == '}' and stack:
+                start = stack.pop()
+                brace_ranges.append((start, i))
+
+        re_tkey = re.compile(r'\b([A-Za-z_]\w*)\s*=(?!=)')
+        for bstart, bend in brace_ranges:
+            region = text[bstart:bend + 1]
+            for m in re_tkey.finditer(region):
+                abs_start = bstart + m.start(1)
+                abs_end = bstart + m.end(1)
+                key_positions.add((abs_start, abs_end))
+
+        return key_positions
 
     def analyze(self):
         doc = self.document()
@@ -163,41 +206,101 @@ class LuauHighlighter(QSyntaxHighlighter):
                         stripped[i] = ' '
         stripped_text = ''.join(stripped)
 
-        declared = set()
+        table_key_positions = self._find_table_key_positions(stripped_text)
 
-        def add_names(group_text):
+        func_call_positions = set()
+        for m in self._re_func_call.finditer(stripped_text):
+            func_call_positions.add((m.start(1), m.end(1)))
+
+        declared = set()
+        declared_positions = {}
+
+        def add_names(group_text, base_offset):
+            offset = 0
             for name in group_text.split(','):
+                raw_name = name
                 name = name.strip()
                 if name and name != '...' and re.match(r'^[A-Za-z_]\w*$', name):
                     declared.add(name)
+                    name_pos = group_text.find(name, offset)
+                    if name_pos >= 0:
+                        abs_pos = base_offset + name_pos
+                        if name not in declared_positions:
+                            declared_positions[name] = []
+                        declared_positions[name].append(abs_pos)
+                offset += len(raw_name) + 1  # +1 for comma
 
         for m in self._re_local_func.finditer(stripped_text):
-            declared.add(m.group(1))
+            name = m.group(1)
+            declared.add(name)
+            if name not in declared_positions:
+                declared_positions[name] = []
+            declared_positions[name].append(m.start(1))
+
         for m in self._re_local_vars.finditer(stripped_text):
-            add_names(m.group(1))
+            add_names(m.group(1), m.start(1))
+
         for m in self._re_func_params.finditer(stripped_text):
-            add_names(m.group(1))
+            add_names(m.group(1), m.start(1))
+
         for m in self._re_for_in.finditer(stripped_text):
-            add_names(m.group(1))
+            add_names(m.group(1), m.start(1))
+
         for m in self._re_for_num.finditer(stripped_text):
-            declared.add(m.group(1))
+            name = m.group(1)
+            declared.add(name)
+            if name not in declared_positions:
+                declared_positions[name] = []
+            declared_positions[name].append(m.start(1))
+
         for m in self._re_assign_target.finditer(stripped_text):
+            declared.add(m.group(1))
+
+        for m in self._re_global_func.finditer(stripped_text):
             declared.add(m.group(1))
 
         known = self._known_builtins | declared
 
-        ranges = []
+        undefined_ranges = []
+        used_names = set()
+
         for m in self._re_identifier.finditer(stripped_text):
             name = m.group()
             start = m.start()
+            end = m.end()
+
             prev_char = stripped_text[start - 1] if start > 0 else ''
             if prev_char in ('.', ':'):
                 continue
-            if name in known:
-                continue
-            ranges.append((start, len(name)))
 
-        self.undefined_ranges = ranges
+            if (start, end) in table_key_positions:
+                continue
+
+            if name in known:
+                if name in declared_positions:
+                    if start not in declared_positions[name]:
+                        used_names.add(name)
+                continue
+
+            if (start, end) in func_call_positions:
+                continue
+
+            undefined_ranges.append((start, len(name)))
+
+        self.undefined_ranges = undefined_ranges
+
+        unused_ranges = []
+        for name, positions in declared_positions.items():
+            if name in used_names:
+                continue
+            if name.startswith('_'):
+                continue
+            if name in self._known_builtins:
+                continue
+            for pos in positions:
+                unused_ranges.append((pos, len(name)))
+
+        self.unused_ranges = unused_ranges
 
     def highlightBlock(self, text):
         self.analyze()
@@ -233,6 +336,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         block_start = self.currentBlock().position()
         block_end = block_start + len(text)
+
         for start, length in self.undefined_ranges:
             if start >= block_end or start + length <= block_start:
                 continue
@@ -242,6 +346,17 @@ class LuauHighlighter(QSyntaxHighlighter):
                 fmt = self.format(rel_start)
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
                 fmt.setUnderlineColor(QColor("#ff4d4d"))
+                self.setFormat(rel_start, rel_end - rel_start, fmt)
+
+        for start, length in self.unused_ranges:
+            if start >= block_end or start + length <= block_start:
+                continue
+            rel_start = max(start, block_start) - block_start
+            rel_end = min(start + length, block_end) - block_start
+            if rel_end > rel_start:
+                fmt = self.format(rel_start)
+                fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+                fmt.setUnderlineColor(QColor("#e8b634"))
                 self.setFormat(rel_start, rel_end - rel_start, fmt)
 
 class CodeEditor(QPlainTextEdit):
