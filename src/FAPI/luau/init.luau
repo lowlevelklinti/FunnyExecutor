@@ -1271,6 +1271,7 @@ local input_methods = {
 	mouserel = 'movemouserel',
 	mousemoverel = 'movemouserel',
 	keyclick = 'keyclick',
+    keytap = 'keyclick',
 	keypress = 'keyclick',
 	keyrelease = 'keyrelease',
 	mousescroll = 'mousescroll',
