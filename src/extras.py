@@ -102,7 +102,7 @@ class LuauHighlighter(QSyntaxHighlighter):
             'getconnections', 'hookfunction', 'hookmetamethod',
             'getrawmetatable', 'setrawmetatable', 'checkcaller',
             'getcallingscript', 'getinstances', 'gethiddenproperty', 'sethiddenproperty',
-            'setsimulationradius', 'isscriptable', 'setscriptable',
+            'setsimulationradius', 'isscriptable', 'setscriptable', 'getcustomasset'
         ]
         for word in self.unc_keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
