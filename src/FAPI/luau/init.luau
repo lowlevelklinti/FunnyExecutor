@@ -12,7 +12,7 @@ folder.Parent = game.CoreGui
 -- vars
 local http = game.HttpService
 local lastValue = upd.Value
-local bridgeServer = 'http://localhost:9475'
+local bridgeServer = 'http://127.0.0.1:9475'
 
 -- modules
 
@@ -675,14 +675,6 @@ for i = 1, #b64_alphabet do
 end
 
 -- imvast
-hookfunction = function(func, rep)
-	for i,v in pairs(getfenv()) do
-		if v == func then
-			getfenv()[i] = rep
-		end
-	end
-end
-
 local ssbs = {}
 local hiddenProperties = {}
 
@@ -702,6 +694,23 @@ function isscriptable(object, property)
     return false
 end
 
+getcallingscript = function()
+ local s = debug.info(1, 's')
+ for i, v in next, game:GetDescendants() do
+  if v:GetFullName() == s then return v end
+ end
+ return nil
+end
+
+clonefunction = function(func)
+    assert(type(func) == "function", "function expected")
+
+    return function(...)
+        return func(...)
+    end
+end
+
+-- not work
 function setscriptable(object, property, bool)
     if object and typeof(object) == 'Instance' and property then
         local scriptable = isscriptable(object, property)
@@ -713,7 +722,7 @@ function setscriptable(object, property, bool)
         end
         return scriptable
     end
-end
+end 
 
 function gethiddenproperty(instance, property)
     assert(typeof(instance) == "Instance", "invalid argument #1 to 'gethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2)
@@ -732,7 +741,7 @@ function gethiddenproperty(instance, property)
     end
     
     error("Unable to get hidden property '" .. property .. "' from " .. instance.ClassName, 2)
-end
+end 
 
 function sethiddenproperty(instance, property, value)
     assert(typeof(instance) == "Instance", "invalid argument #1 to 'sethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2) 
@@ -755,7 +764,7 @@ function sethiddenproperty(instance, property, value)
     end
     
     error("Unable to set hidden property '" .. property .. "' on " .. instance.ClassName, 2)
-end
+end 
 --
 
 function base64encode(data)
@@ -1134,6 +1143,15 @@ listfiles = function(path)
 	return response:split('\n')
 end
 
+getcustomasset = function(path)
+	assert(type(path) == 'string', "invalid argument #1 to 'getcustomasset' (string expected, got " .. type(path) .. ')', 2)
+	local response = send_method('getcustomasset', path)
+	if not response or response == 'fail' or response == 'bad request' or response == '' then
+		error('FunnyExecutor -- getcustomasset: cannot load asset: ' .. path, 2)
+	end
+	return response
+end
+
 -- loadfile
 
 loadfile = function(path: string)
@@ -1335,15 +1353,6 @@ newcclosure = function(func)
 	return wrapped
 end
 
-clonefunction = function(func)
-	assert(type(func) == 'function', "invalid argument #1 to 'clonefunction' (function expected, got " .. type(func) .. ')', 2)
-	if iscclosure(func) then
-		return newcclosure(func)
-	end
-	return function(...)
-		return func(...)
-	end
-end
 
 isexecutorclosure = function(func)
 	if type(func) ~= 'function' then
@@ -2118,9 +2127,6 @@ getsenv = function(script_inst)
 	return module_env(script_inst)
 end
 
-getcallingscript = function()
-	return nil
-end
 
 -- isreadonly
 

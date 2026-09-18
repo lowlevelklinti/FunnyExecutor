@@ -1,3 +1,4 @@
+import atexit
 import base64
 import ctypes
 import ctypes.wintypes
@@ -66,6 +67,92 @@ def resolve_path(raw: bytes):
     except (OSError, ValueError):
         return None
     return target
+
+
+def roblox_content_dir():
+    content = None
+    try:
+        for p in psutil.process_iter(['name', 'exe']):
+            try:
+                if p.info.get('name') == 'RobloxPlayerBeta.exe' and p.info.get('exe'):
+                    candidate = Path(p.info['exe']).parent / 'content'
+                    if candidate.is_dir():
+                        content = candidate
+                        break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+
+    if content is None:
+        bases = []
+        for env in ('LOCALAPPDATA', 'ProgramFiles(x86)', 'ProgramFiles'):
+            root = Path(os.environ.get(env, ''))
+            for name in ('Roblox', 'Fishstrap'):
+                base = root / name / 'Versions'
+                if base.is_dir():
+                    bases.append(base)
+
+        preferred = getattr(_sdk, 'version', None) if _sdk is not None else None
+
+        def version_dirs():
+            for base in bases:
+                try:
+                    dirs = [e for e in base.iterdir() if e.is_dir()]
+                except OSError:
+                    continue
+                dirs.sort(key=lambda e: e.stat().st_mtime, reverse=True)
+                for d in dirs:
+                    yield d
+
+        for d in version_dirs():
+            if preferred and d.name == preferred and (d / 'content').is_dir():
+                content = d / 'content'
+                break
+
+        if content is None:
+            for d in version_dirs():
+                c = d / 'content'
+                if c.is_dir() and ((d / 'RobloxPlayerBeta.exe').is_file() or (d / 'RobloxPlayer.exe').is_file()):
+                    content = c
+                    break
+
+        if content is None:
+            for d in version_dirs():
+                c = d / 'content'
+                if c.is_dir():
+                    content = c
+                    break
+
+    return content
+
+
+_asset_manifest = parent / 'custom_assets.json'
+
+def asset_manifest_read():
+    try:
+        with open(_asset_manifest, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return [str(p) for p in data if isinstance(p, str)]
+    except (OSError, ValueError):
+        pass
+    return []
+
+def asset_manifest_write(paths):
+    try:
+        with open(_asset_manifest, 'w', encoding='utf-8') as f:
+            json.dump(paths, f)
+    except OSError:
+        pass
+
+def cleanup_customassets():
+    for p in asset_manifest_read():
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    asset_manifest_write([])
 
 
 _console_state = {'allocated': False}
@@ -605,6 +692,32 @@ def recv_method(method, args):
             return b'fail'
         return b'ok'
 
+    elif method == 'getcustomasset':
+        if not path.is_file():
+            return b'fail'
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return b'fail'
+        content_dir = roblox_content_dir()
+        if content_dir is None:
+            return b'fail'
+        try:
+            content_dir.mkdir(parents=True, exist_ok=True)
+            name = hashlib.sha1(data).hexdigest() + (path.suffix or '')
+            target = content_dir / name
+            if not (target.exists() and target.read_bytes() == data):
+                tmp = content_dir / (name + '.tmp')
+                tmp.write_bytes(data)
+                os.replace(tmp, target)
+            paths = asset_manifest_read()
+            if str(target) not in paths:
+                paths.append(str(target))
+                asset_manifest_write(paths)
+        except OSError:
+            return b'fail'
+        return ('rbxasset://' + name).encode('ascii')
+
     elif method == 'readfile':
         try:
             with open(path, 'rb') as f:
@@ -776,6 +889,8 @@ def start_bridge():
     httpd = socketserver.ThreadingTCPServer(("127.0.0.1", PORT), Handler)
     httpd.daemon_threads = True
     Thread(target=httpd.serve_forever, daemon=True).start()
+    cleanup_customassets()
+    atexit.register(cleanup_customassets)
 
 def create_workspace():
     if not (parent / 'workspace').is_dir():
