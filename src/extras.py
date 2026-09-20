@@ -1,10 +1,12 @@
 import re
 
-from PySide6.QtCore import QRegularExpression, QRect, Qt
+from PySide6.QtCore import QRegularExpression, QRect, Qt, QTimer
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PySide6.QtWidgets import QPlainTextEdit, QMessageBox
 
 bold_font = 700
+
+_luauRules = None
 
 class LuauHighlighter(QSyntaxHighlighter):
     # debugger
@@ -26,6 +28,22 @@ class LuauHighlighter(QSyntaxHighlighter):
 
     def __init__(self, document):
         super().__init__(document)
+
+        global _luauRules
+
+        self.progressiveLimit = None
+        self._last_revision = None
+        self.undefined_ranges = []
+        self.unused_ranges = []
+
+        if _luauRules is not None:
+            self.rules = _luauRules['rules']
+            self.comment_format = _luauRules['commentFormat']
+            self.block_comment_start = _luauRules['blockCommentStart']
+            self.block_comment_end = _luauRules['blockCommentEnd']
+            self._known_builtins = _luauRules['knownBuiltins']
+            return
+
         self.rules = []
 
         # keywords
@@ -154,9 +172,14 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         self._known_builtins = set(self.keywords) | set(self.booleans) | \
             set(self.globals_keywords) | set(self.unc_keywords)
-        self._last_revision = None
-        self.undefined_ranges = []
-        self.unused_ranges = []
+
+        _luauRules = {
+            'rules': self.rules,
+            'commentFormat': self.comment_format,
+            'blockCommentStart': self.block_comment_start,
+            'blockCommentEnd': self.block_comment_end,
+            'knownBuiltins': self._known_builtins,
+        }
 
     def _find_table_key_positions(self, text):
         key_positions = set()
@@ -195,9 +218,9 @@ class LuauHighlighter(QSyntaxHighlighter):
         if self._last_revision == doc.revision():
             return
         self._last_revision = doc.revision()
+        self.analyzeText(doc.toPlainText())
 
-        text = doc.toPlainText()
-
+    def analyzeText(self, text):
         stripped = list(text)
         for rx in (self._re_block_comment, self._re_line_comment, self._re_dstring, self._re_sstring):
             for m in rx.finditer(text):
@@ -303,7 +326,12 @@ class LuauHighlighter(QSyntaxHighlighter):
         self.unused_ranges = unused_ranges
 
     def highlightBlock(self, text):
-        self.analyze()
+        limit = self.progressiveLimit
+        if limit is not None:
+            if limit == 0:
+                return
+            if self.currentBlock().blockNumber() >= limit:
+                return
 
         for pattern, fmt in self.rules:
             match_iterator = pattern.globalMatch(text)
@@ -360,7 +388,11 @@ class LuauHighlighter(QSyntaxHighlighter):
                 self.setFormat(rel_start, rel_end - rel_start, fmt)
 
 class CodeEditor(QPlainTextEdit):
-    def __init__(self):
+    SYNC_BLOCK_LIMIT = 200
+    SYNC_CHAR_LIMIT = 10000
+    PROGRESSIVE_CHUNK = 40
+
+    def __init__(self, content=None):
         super().__init__()
 
         self.setObjectName(u"codeEditor")
@@ -372,17 +404,92 @@ class CodeEditor(QPlainTextEdit):
         font1.setPointSize(12)
         self.setFont(font1)
 
-        self.highlighter = LuauHighlighter(self.document())
-        self.setPlainText('print("Hello, World!")')
-
+        self.highlighter = None
         self._rehighlighting = False
-        self.document().contentsChanged.connect(self._on_text_changed)
+        self._progressiveBlock = 0
 
-    def _on_text_changed(self):
-        if self._rehighlighting:
+        self._highlightTimer = QTimer(self)
+        self._highlightTimer.setSingleShot(True)
+        self._highlightTimer.setInterval(200)
+        self._highlightTimer.timeout.connect(self._runHighlight)
+
+        self._progressiveTimer = QTimer(self)
+        self._progressiveTimer.setInterval(0)
+        self._progressiveTimer.timeout.connect(self._progressiveStep)
+
+        if content is None:
+            content = 'print("Hello, World!")'
+        self.setPlainText(content)
+
+        self.document().contentsChanged.connect(self._onContentsChanged)
+
+    def _isLarge(self):
+        doc = self.document()
+        return doc.blockCount() > self.SYNC_BLOCK_LIMIT or doc.characterCount() > self.SYNC_CHAR_LIMIT
+
+    def attachHighlighter(self):
+        if self.highlighter is not None:
+            return
+        self.highlighter = LuauHighlighter(self.document())
+
+        if not self._isLarge():
+            self.highlighter.analyze()
+            self.highlighter.rehighlight()
+            return
+
+        self.highlighter.progressiveLimit = 0
+        self.highlighter.undefined_ranges = []
+        self.highlighter.unused_ranges = []
+        self._startProgressive()
+
+    def _startProgressive(self):
+        if self.highlighter is None:
+            return
+        self._progressiveBlock = 0
+        if not self._progressiveTimer.isActive():
+            self._progressiveTimer.start()
+
+    def _progressiveStep(self):
+        hl = self.highlighter
+        if hl is None:
+            self._progressiveTimer.stop()
+            return
+
+        doc = self.document()
+        total = doc.blockCount()
+        start = self._progressiveBlock
+
+        if start >= total:
+            hl.progressiveLimit = None
+            self._progressiveTimer.stop()
+            return
+
+        end = min(start + self.PROGRESSIVE_CHUNK, total)
+        hl.progressiveLimit = end
+
+        block = doc.findBlockByNumber(start)
+        if block.isValid():
+            hl.rehighlightBlock(block)
+
+        self._progressiveBlock = end
+
+        if end >= total:
+            hl.progressiveLimit = None
+            self._progressiveTimer.stop()
+
+    def _onContentsChanged(self):
+        if self.highlighter is None or self._progressiveTimer.isActive():
+            return
+        self._highlightTimer.start()
+
+    def _runHighlight(self):
+        if self.highlighter is None or self._rehighlighting:
+            return
+        if self._isLarge():
             return
         self._rehighlighting = True
         try:
+            self.highlighter.analyze()
             self.highlighter.rehighlight()
         finally:
             self._rehighlighting = False

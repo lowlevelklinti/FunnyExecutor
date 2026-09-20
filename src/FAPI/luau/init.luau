@@ -1315,7 +1315,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.430'
+	return 'FunnyExecutor', 'v0.445'
 end
 
 getexecutorname = function()

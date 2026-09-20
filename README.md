@@ -37,6 +37,9 @@
 If you'd like to support **Funny Executor**, you can donate using the official project's wallet addresses:
 
 **BTC:**
+`bc1q5cyw5kj3l5dgtksl0nhsp9l5m87g2c9qhvaysl`
+
+**ETH**
 `0x52ef074a0fb46e9c6c675b646aaed154b360d26a`
 
 ### Community

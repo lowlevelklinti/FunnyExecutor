@@ -3,237 +3,293 @@ import os.path
 import shutil
 import sys
 import time
-import threading
 import psutil
 
 from design import Ui_MainWindow
 
-from PySide6.QtCore import QTimer, Qt  # test
+from PySide6.QtCore import QTimer, Qt, QThread, QObject, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from extras import CodeEditor, MessageBox
 
 import FAPI
 
-executor: FAPI.Executor | None = None
-sdk: FAPI.sdk.Roblox | None = None
+class RobloxWorker(QObject):
+    statusChanged = Signal(str)
+    showMessage = Signal(str, str, str)
 
-def load_exec():
-    global executor
-    global sdk
+    def __init__(self):
+        super().__init__()
+        self.executor = None
+        self.sdk = None
+        self.injected = False
+        self.queued = False
+        self._injecting = False
+        self._lastInjectTry = 0.0
+        self._timer = None
 
-    try:
-        if not FAPI.roblox_open():
-            unload_exec()
-            return
-    except:
-        unload_exec()
-        return
+    @Slot()
+    def start(self):
+        self._timer = QTimer()
+        self._timer.timeout.connect(self.poll)
+        self._timer.start(250)
 
-    if executor is not None and sdk is not None:
+    @Slot()
+    def stop(self):
+        if self._timer is not None:
+            self._timer.stop()
+
+    def ensureExecutor(self):
+        if self.executor is not None and self.sdk is not None:
+            try:
+                if psutil.pid_exists(self.sdk.mem.process_id):
+                    return True
+            except:
+                pass
+            self.executor = None
+            self.sdk = None
+
         try:
-            if psutil.pid_exists(sdk.mem.process_id):
+            if not FAPI.roblox_open():
+                self.executor = None
+                self.sdk = None
+                return False
+        except:
+            self.executor = None
+            self.sdk = None
+            return False
+
+        try:
+            self.executor = FAPI.Executor()
+            self.sdk = self.executor.sdk
+            return True
+        except:
+            self.executor = None
+            self.sdk = None
+            return False
+
+    @Slot()
+    def poll(self):
+        if self._injecting:
+            return
+
+        if not self.ensureExecutor():
+            self.queued = False
+            self.injected = False
+            self.statusChanged.emit('idle')
+            return
+
+        try:
+            self.injected = self.executor.injected
+        except:
+            self.injected = False
+
+        if self.injected:
+            self.statusChanged.emit('injected')
+        elif self.queued:
+            self.statusChanged.emit('queued')
+            self.tryInject()
+        else:
+            self.statusChanged.emit('idle')
+
+    def tryInject(self):
+        if self._injecting or self.injected:
+            return
+
+        try:
+            if self.executor.injected:
+                return
+            dm = self.sdk.datamodel
+            if not dm or dm.name != 'Ugc' or not dm.address:
+                return
+            if dm.address in self.executor._handled_dms:
+                return
+            players = dm.find_first_child('Players')
+            if not players or not players.get_children():
+                return
+        except:
+            return
+
+        if time.time() - self._lastInjectTry < 1.0:
+            return
+
+        self._lastInjectTry = time.time()
+        self._injecting = True
+        try:
+            self.executor.inject()
+        except Exception as e:
+            print(e)
+        finally:
+            self._injecting = False
+
+    @Slot()
+    def requestInject(self):
+        if not self.ensureExecutor():
+            self.showMessage.emit('warning', 'Injection failed', 'You must have Roblox open to inject')
+            return
+
+        try:
+            if self.executor.injected:
+                self.showMessage.emit('information', 'Injection failed', 'Already injected')
                 return
         except:
             pass
 
-    try:
-        executor = FAPI.Executor()
-        sdk = executor.sdk
-    except:
-        unload_exec()
+        self.queued = True
+        self.tryInject()
 
-def unload_exec():
-    global executor
-    global sdk
+    @Slot(str)
+    def requestExecute(self, script):
+        ready = False
+        if self.executor is not None:
+            try:
+                ready = self.executor.injected
+            except:
+                ready = False
 
-    executor, sdk = None, None
+        if not ready:
+            self.showMessage.emit('warning', 'Execution failed', 'You must inject before executing')
+            return
+
+        try:
+            self.executor.execute(script)
+        except Exception as e:
+            print(e)
 
 class Window(QMainWindow, Ui_MainWindow):
+    injectRequested = Signal()
+    executeRequested = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.setupUi(self)
 
-        self._injecting = False
-        self._warned = False
-        self._queued = False
-        self._last_inject_try = 0
-
-        def check_and_inject():
-            if not self._queued or self._injecting:
-                return
-
-            load_exec()
-
-            if not executor or not sdk:
-                return
-
-            try:
-                if executor.injected:
-                    return
-                dm = sdk.datamodel
-                if not dm or dm.name != 'Ugc' or not dm.address:
-                    return
-                if dm.address in executor._handled_dms:
-                    return
-                players = dm.find_first_child('Players')
-                if not players or not players.get_children():
-                    return
-            except:
-                return
-
-            if time.time() - self._last_inject_try < 1.0:
-                return
-
-            self._last_inject_try = time.time()
-            self._injecting = True
-
-            def worker():
-                try:
-                    executor.inject()
-                except Exception as e:
-                    print(e)
-                finally:
-                    self._injecting = False
-
-            threading.Thread(target=worker, daemon=True).start()
-
-        def inject():
-            load_exec()
-            try:
-                if not FAPI.roblox_open():
-                    MessageBox.warning("Injection failed", "You must have Roblox open to inject")
-                    return
-            except:
-                MessageBox.warning("Injection failed", "You must have Roblox open to inject")
-                return
-
-            if executor:
-                try:
-                    if executor.injected:
-                        MessageBox.information("Injection failed", "Already injected")
-                        return
-                except:
-                    pass
-
-            self._queued = True
-            check_and_inject()
-            update_status()
-
-        def execute():
-            if not executor or not executor.injected:
-                MessageBox.warning("Execution failed", "You must inject before executing")
-                return
-
-            script = self._get_current_editor().toPlainText()
-            executor.execute(script)
-
-        def update_status():
-            load_exec()
-
-            try:
-                if not FAPI.roblox_open():
-                    self._queued = False
-            except:
-                self._queued = False
-
-            is_injected = False
-            if executor:
-                try:
-                    is_injected = executor.injected
-                except:
-                    is_injected = False
-
-            if is_injected:
-                self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
-            elif self._queued:
-                self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
-                check_and_inject()
-            else:
-                self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
-
-            self.statusLabel.update()
-
-        def import_luau():
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Open File",
-                "",
-                "Luau Script (*.luau; *.lua);;All Files (*)"
-            )
-            editor = self._get_current_editor()
-
-            if file_path and editor:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    editor.setPlainText(f.read())
-
-        def export_luau():
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save File",
-                "",
-                "Luau source files (*.lua; *.luau);;All Files (*)"
-            )
-            editor = self._get_current_editor()
-
-            if file_path and editor:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(editor.toPlainText())
-
         self._tab_number = 0
 
-        def new_tab(name=None, content=None):
-            return self._add_tab(name, content)
+        self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
 
-        def close_tab(index):
-            widget = self.tabWidget.widget(index)
-            widget.deleteLater()
-            self.tabWidget.removeTab(index)
-            if self.tabWidget.count() == 0:
-                self._tab_number = 1
-                self._add_tab("Script #1")
+        self._thread = QThread(self)
+        self._worker = RobloxWorker()
+        self._worker.moveToThread(self._thread)
+        self._worker.statusChanged.connect(self.onStatusChanged)
+        self._worker.showMessage.connect(self.onShowMessage)
+        self.injectRequested.connect(self._worker.requestInject)
+        self.executeRequested.connect(self._worker.requestExecute)
+        self._thread.started.connect(self._worker.start)
 
-        def ontop():
-            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.actionTop_Most.isChecked())
-            self.show()  # cuz it hides the window for some reason
-
-        self.injectButton.clicked.connect(inject)
-        self.executeButton.clicked.connect(execute)
-
-        self.importButton.clicked.connect(import_luau)
-        self.exportButton.clicked.connect(export_luau)
-        self.newTabButton.clicked.connect(lambda: self.tabWidget.setCurrentIndex(new_tab()))
+        self.injectButton.clicked.connect(self.onInject)
+        self.executeButton.clicked.connect(self.onExecute)
+        self.importButton.clicked.connect(self.importLuau)
+        self.exportButton.clicked.connect(self.exportLuau)
+        self.newTabButton.clicked.connect(self.onNewTab)
 
         self.actionExit_Alt_F4.triggered.connect(QApplication.quit)
-        self.actionExport.triggered.connect(export_luau)
-        self.actionImport.triggered.connect(import_luau)
-        self.actionInject.triggered.connect(inject)
-        self.actionExecute.triggered.connect(execute)
+        self.actionExport.triggered.connect(self.exportLuau)
+        self.actionImport.triggered.connect(self.importLuau)
+        self.actionInject.triggered.connect(self.onInject)
+        self.actionExecute.triggered.connect(self.onExecute)
 
-        self.actionNew_Tab.triggered.connect(lambda: new_tab())
+        self.actionNew_Tab.triggered.connect(lambda: self._add_tab())
         self.actionSave_Tabs.triggered.connect(lambda: self._save_tabs())
         self.actionClear_Tabs.triggered.connect(self._clear_tabs)
 
-        self.actionTop_Most.triggered.connect(ontop)
+        self.actionTop_Most.triggered.connect(self.onTop)
 
-        self.tabWidget.tabCloseRequested.connect(close_tab)
+        self.tabWidget.tabCloseRequested.connect(self.closeTab)
+        self.tabWidget.currentChanged.connect(self.onTabChanged)
 
         self._load_tabs()
+        self.attachCurrentEditor()
 
-        try:
-            load_exec()
-        except:
-            unload_exec()
+        self.onTop()
 
-        update_status()
-        ontop()
+        self._thread.start()
 
-        timer_update = QTimer(self)
-        timer_update.timeout.connect(update_status)
-        timer_update.start(250)
+        self._autosaveTimer = QTimer(self)
+        self._autosaveTimer.timeout.connect(self._save_tabs)
+        self._autosaveTimer.start(10000)
 
-        timer_autosave = QTimer(self)
-        timer_autosave.timeout.connect(self._save_tabs)
-        timer_autosave.start(10000)
+    @Slot(str)
+    def onStatusChanged(self, state):
+        if state == 'injected':
+            self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
+        elif state == 'queued':
+            self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
+        else:
+            self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
+
+    @Slot(str, str, str)
+    def onShowMessage(self, kind, title, text):
+        if kind == 'information':
+            MessageBox.information(title, text)
+        else:
+            MessageBox.warning(title, text)
+
+    def onInject(self):
+        self.injectRequested.emit()
+
+    def onExecute(self):
+        editor = self._get_current_editor()
+        if editor is None:
+            return
+        self.executeRequested.emit(editor.toPlainText())
+
+    def onNewTab(self):
+        self.tabWidget.setCurrentIndex(self._add_tab())
+
+    def onTabChanged(self, index):
+        if index < 0:
+            return
+        editor = self.tabWidget.widget(index)
+        if editor is not None:
+            editor.attachHighlighter()
+
+    def attachCurrentEditor(self):
+        editor = self.tabWidget.currentWidget()
+        if editor is not None:
+            editor.attachHighlighter()
+
+    def onTop(self):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.actionTop_Most.isChecked())
+        self.show()
+
+    def importLuau(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open File",
+            "",
+            "Luau Script (*.luau; *.lua);;All Files (*)"
+        )
+        editor = self._get_current_editor()
+
+        if file_path and editor:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                editor.setPlainText(f.read())
+
+    def exportLuau(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save File",
+            "",
+            "Luau source files (*.lua; *.luau);;All Files (*)"
+        )
+        editor = self._get_current_editor()
+
+        if file_path and editor:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(editor.toPlainText())
+
+    def closeTab(self, index):
+        widget = self.tabWidget.widget(index)
+        widget.deleteLater()
+        self.tabWidget.removeTab(index)
+        if self.tabWidget.count() == 0:
+            self._tab_number = 1
+            self._add_tab("Script #1")
+
+    def _shutdownWorker(self):
+        self._worker.stop()
+        self._thread.quit()
+        self._thread.wait(3000)
 
     def _save_tabs(self):
         data = [self._tab_number]
@@ -257,10 +313,7 @@ class Window(QMainWindow, Ui_MainWindow):
             self._add_tab("Script #1")
 
     def _add_tab(self, name=None, content=None):
-        editor = CodeEditor()
-
-        if content is not None:
-            editor.setPlainText(content)
+        editor = CodeEditor(content)
 
         if name is None:
             self._tab_number += 1
@@ -286,6 +339,7 @@ class Window(QMainWindow, Ui_MainWindow):
         )
         if answer == MessageBox.StandardButton.Yes:
             self._save_tabs()
+            self._shutdownWorker()
             event.accept()
         else:
             event.ignore()
@@ -309,5 +363,6 @@ if __name__ == '__main__':
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
 
     window = Window()
+    app.aboutToQuit.connect(window._shutdownWorker)
     window.show()
     sys.exit(app.exec())
