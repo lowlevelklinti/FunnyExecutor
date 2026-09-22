@@ -7,11 +7,10 @@ import pymem
 from . import offsets
 
 class CustomOffsets:
-    module_bytecode = 0x138
-    module_state = 0x170  # not sure
+    module_bytecode = 0x128
     bytecode_size = 0x28
     bytecode_ptr = 0x18
-    local_bytecode = 0x190
+    local_bytecode = 0x180
 
 class SdkError(Exception): pass
 
