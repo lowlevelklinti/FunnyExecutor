@@ -1,8 +1,8 @@
 import re
 
-from PySide6.QtCore import QRegularExpression, QRect, Qt, QTimer
-from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
-from PySide6.QtWidgets import QPlainTextEdit, QMessageBox
+from PySide6.QtCore import QRegularExpression, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QPainter
+from PySide6.QtWidgets import QPlainTextEdit, QMessageBox, QWidget
 
 bold_font = 700
 
@@ -48,7 +48,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # keywords
         keyword_format = QTextCharFormat()
-        keyword_format.setForeground(QColor("#eb7973"))
+        keyword_format.setForeground(QColor("#8e9ae6"))
         keyword_format.setFontWeight(bold_font)
         self.keywords = [
             "and", "break", "do", "else", "elseif", "end",
@@ -62,7 +62,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # booleans
         bool_format = QTextCharFormat()
-        bool_format.setForeground(QColor("#f2ba2a"))
+        bool_format.setForeground(QColor("#d6cc61"))
         bool_format.setFontWeight(bold_font)
         self.booleans = ['true', 'false']
         for word in self.booleans:
@@ -71,7 +71,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # globals
         globals_format = QTextCharFormat()
-        globals_format.setForeground(QColor("#8fb4ff"))
+        globals_format.setForeground(QColor("#d6cc61"))
         self.globals_keywords = [
             "print", 'math', 'string', 'table',
             'type', 'tonumber', 'tostring', 'error', 'pcall',
@@ -93,7 +93,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # unc
         unc_format = QTextCharFormat()
-        unc_format.setForeground(QColor("#9f6dd1"))
+        unc_format.setForeground(QColor("#8e9ae6"))
         self.unc_keywords = [
             'getgenv', 'base64encode', 'base64decode', 'crypt',
             'lz4compress', 'lz4decompress', 'loadstring',
@@ -128,19 +128,19 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # numbers
         number_format = QTextCharFormat()
-        number_format.setForeground(QColor("#f2ba2a"))
+        number_format.setForeground(QColor("#d6cc61"))
         self.rules.append((QRegularExpression(r"\b\d+(\.\d+)?\b"), number_format))
 
         # member
         member_format = QTextCharFormat()
-        member_format.setForeground(QColor("#70a0ff"))
+        member_format.setForeground(QColor("#7b99ec"))
 
         member_pattern = QRegularExpression(r"(?<=\.)[a-zA-Z_][a-zA-Z0-9_]*\b")
         self.rules.append((member_pattern, member_format))
 
         # functions
         function_format = QTextCharFormat()
-        function_format.setForeground(QColor("#fae4aa"))
+        function_format.setForeground(QColor("#7b99ec"))
 
         # func calls
         pat = '|'.join(self.unc_keywords + self.globals_keywords)
@@ -153,13 +153,13 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         # strings
         string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#8ee9b6"))
+        string_format.setForeground(QColor("#abd4b4"))
         self.rules.append((QRegularExpression('"[^"\\\\]*(\\\\.[^"\\\\]*)*"'), string_format))
         self.rules.append((QRegularExpression("'[^'\\\\]*(\\\\.[^'\\\\]*)*'"), string_format))
 
         # comment
         self.comment_format = QTextCharFormat()
-        self.comment_format.setForeground(QColor("#6a6f81"))
+        self.comment_format.setForeground(QColor("#646464"))
         self.comment_format.setFontItalic(True)
         self.rules.append((QRegularExpression("--[^\n]*"), self.comment_format))
 
@@ -168,7 +168,7 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         self.undefined_format = QTextCharFormat()
         self.undefined_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-        self.undefined_format.setUnderlineColor(QColor("#ff4d4d"))
+        self.undefined_format.setUnderlineColor(QColor("#ff5561"))
 
         self._known_builtins = set(self.keywords) | set(self.booleans) | \
             set(self.globals_keywords) | set(self.unc_keywords)
@@ -373,7 +373,7 @@ class LuauHighlighter(QSyntaxHighlighter):
             if rel_end > rel_start:
                 fmt = self.format(rel_start)
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                fmt.setUnderlineColor(QColor("#ff4d4d"))
+                fmt.setUnderlineColor(QColor("#ff5561"))
                 self.setFormat(rel_start, rel_end - rel_start, fmt)
 
         for start, length in self.unused_ranges:
@@ -384,8 +384,19 @@ class LuauHighlighter(QSyntaxHighlighter):
             if rel_end > rel_start:
                 fmt = self.format(rel_start)
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                fmt.setUnderlineColor(QColor("#e8b634"))
+                fmt.setUnderlineColor(QColor("#d6cc61"))
                 self.setFormat(rel_start, rel_end - rel_start, fmt)
+
+class LineNumberArea(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.lineNumberAreaWidth(), 0)
+
+    def paintEvent(self, event):
+        self.editor.lineNumberAreaPaintEvent(event)
 
 class CodeEditor(QPlainTextEdit):
     SYNC_BLOCK_LIMIT = 200
@@ -396,13 +407,18 @@ class CodeEditor(QPlainTextEdit):
         super().__init__()
 
         self.setObjectName(u"codeEditor")
-        self.setGeometry(QRect(10, 120, 821, 371))
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.setStyleSheet("QPlainTextEdit{background-color:#131313;color:#d0d0d0;border:none;padding:6px 6px 6px 4px;selection-background-color:#264f78;}")
 
         font1 = QFont()
-        font1.setFamilies([u"Cascadia Code"])
-        font1.setPointSize(12)
+        font1.setFamilies([u"Consolas"])
+        font1.setPointSize(11)
         self.setFont(font1)
+
+        self.lineNumberArea = LineNumberArea(self)
+        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.updateRequest.connect(self.updateLineNumberArea)
+        self.updateLineNumberAreaWidth()
 
         self.highlighter = None
         self._rehighlighting = False
@@ -493,6 +509,44 @@ class CodeEditor(QPlainTextEdit):
             self.highlighter.rehighlight()
         finally:
             self._rehighlighting = False
+
+    def lineNumberAreaWidth(self):
+        digits = max(1, len(str(self.blockCount())))
+        return 16 + self.fontMetrics().horizontalAdvance("9") * digits
+
+    def updateLineNumberAreaWidth(self, _=0):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberArea(self, rect, dy):
+        if dy:
+            self.lineNumberArea.scroll(0, dy)
+        else:
+            self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self.updateLineNumberAreaWidth()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+
+    def lineNumberAreaPaintEvent(self, event):
+        painter = QPainter(self.lineNumberArea)
+        painter.fillRect(event.rect(), QColor("#131313"))
+        block = self.firstVisibleBlock()
+        blockNumber = block.blockNumber()
+        top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        bottom = top + self.blockBoundingRect(block).height()
+        painter.setPen(QColor("#4a4a4a"))
+        height = self.fontMetrics().height()
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                painter.drawText(0, int(top), self.lineNumberArea.width() - 8, height,
+                                 Qt.AlignmentFlag.AlignRight, str(blockNumber + 1))
+            block = block.next()
+            top = bottom
+            bottom = top + self.blockBoundingRect(block).height()
+            blockNumber += 1
 
 def msgb(icon, title, text, buttons):
     msg = QMessageBox()
