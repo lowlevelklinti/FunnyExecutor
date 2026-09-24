@@ -116,7 +116,7 @@ class Executor:
             print('got EnableLoadModule:', hex(addr))
 
             rbx.mem.write_bool(addr, True)
-            rbx.mem.write_int(plm.address + 0x170, 0)
+            rbx.mem.write_int(plm.address + 0x160, 0)
 
             print('set PlayerListManager.ModuleState to 0')
 

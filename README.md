@@ -42,6 +42,10 @@ If you'd like to support **Funny Executor**, you can donate using the official p
 **ETH:**
 `0x52ef074a0fb46e9c6c675b646aaed154b360d26a`
 
+### Fork
+
+**This Project** is a fork from [brickified](https://github.com/brickified/bricksploit)
+
 ### Community
 
 **[Discord](https://discord.gg/fmTJvVmnA2)**
