@@ -1637,12 +1637,12 @@ getnamecallmethod = function()
 end
 
 load_bytecode = function(bytecode, env)
-	local settings = funny.luau_newsettings()
+	local settings = funnyexecutor.luau_newsettings()
 	settings.vectorCtor = Vector3.new
 	settings.useNativeNamecall = true
 	settings.namecallHandler = namecall_handler
 
-	return (funny.luau_load(bytecode, env or getfenv(), settings))
+	return (funnyexecutor.luau_load(bytecode, env or getfenv(), settings))
 end
 
 task.spawn(function()
