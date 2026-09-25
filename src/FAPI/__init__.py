@@ -1,6 +1,7 @@
 import time
 import ctypes
 import pymem
+
 from . import sdk, bridge
 from .compiler import Luau
 
@@ -12,22 +13,22 @@ import pydirectinput
 import psutil
 
 parent = Path(__file__).resolve().parent
-luau_modules = parent / 'luau'
-bridge.start_bridge()
+luauModules = parent / 'luau'
+bridge.startBridge()
 
-def force_foreground(hwnd):
+def forceForeground(hwnd):
     try:
-        fore_hwnd = win32gui.GetForegroundWindow()
-        if fore_hwnd == hwnd:
+        foregroundHwnd = win32gui.GetForegroundWindow()
+        if foregroundHwnd == hwnd:
             return True
-        fore_thread, _ = win32process.GetWindowThreadProcessId(fore_hwnd)
-        curr_thread = win32process.GetCurrentThreadId()
-        if fore_thread != curr_thread:
-            ctypes.windll.user32.AttachThreadInput(curr_thread, fore_thread, True)
+        foregroundThread, _ = win32process.GetWindowThreadProcessId(foregroundHwnd)
+        currentThread = win32process.GetCurrentThreadId()
+        if foregroundThread != currentThread:
+            ctypes.windll.user32.AttachThreadInput(currentThread, foregroundThread, True)
             ctypes.windll.user32.BringWindowToTop(hwnd)
             ctypes.windll.user32.ShowWindow(hwnd, 5)
             ctypes.windll.user32.SetForegroundWindow(hwnd)
-            ctypes.windll.user32.AttachThreadInput(curr_thread, fore_thread, False)
+            ctypes.windll.user32.AttachThreadInput(currentThread, foregroundThread, False)
         else:
             ctypes.windll.user32.BringWindowToTop(hwnd)
             ctypes.windll.user32.ShowWindow(hwnd, 5)
@@ -44,14 +45,14 @@ class ExecutionError(Exception): pass
 
 class Executor:
     def __init__(self, rbx: sdk.Roblox = None):
-        if not roblox_open():
+        if not robloxOpen():
             raise ExecutionError('Roblox is not open')
 
-        self.sdk: sdk.Roblox = rbx if rbx else get_sdk()
-        bridge.set_sdk(self.sdk)
+        self.sdk: sdk.Roblox = rbx if rbx else getSdk()
+        bridge.setSdk(self.sdk)
         self.strval = None
         self._injecting = False
-        self._handled_dms = set()
+        self._handledDms = set()
 
     @property
     def injected(self):
@@ -61,7 +62,7 @@ class Executor:
                 return False
             if not psutil.pid_exists(self.sdk.mem.process_id):
                 return False
-            if bridge.is_dm_confirmed(dm.address):
+            if bridge.isDmConfirmed(dm.address):
                 return True
             return dm.find('CoreGui', '_funnyexecutor') is not None
         except:
@@ -78,29 +79,29 @@ class Executor:
         if not dm or dm.name != "Ugc" or not dm.address:
             return
 
-        if dm.address in self._handled_dms:
+        if dm.address in self._handledDms:
             return
 
-        players = dm.find_first_child('Players')
-        if not players or not players.get_children():
+        players = dm.findFirstChild('Players')
+        if not players or not players.getChildren():
             return
 
         self._injecting = True
         try:
             print('Injecting')
             if not psutil.pid_exists(self.sdk.mem.process_id):
-                self.sdk = get_sdk()
-                bridge.set_sdk(self.sdk)
+                self.sdk = getSdk()
+                bridge.setSdk(self.sdk)
 
             rbx = self.sdk
             game = rbx.datamodel
             if not game:
                 return
 
-            hwnds = sdk.get_hwnd(rbx.mem.process_handle)
-            if not hwnds:
+            windowHandles = sdk.getHwnd(rbx.mem.process_handle)
+            if not windowHandles:
                 return
-            hwnd = hwnds[0]
+            hwnd = windowHandles[0]
 
             print("Client HWND:", hex(hwnd), '\n')
 
@@ -110,17 +111,17 @@ class Executor:
 
             print('got PlayerListManager:', hex(plm.address))
 
-            EnableLoadModule = rbx.offsets.fflag_enable_load_module
-            addr = rbx.mem.base_address + EnableLoadModule
+            enableLoadModule = rbx.offsets.fflagEnableLoadModule
+            addr = rbx.mem.base_address + enableLoadModule
 
             print('got EnableLoadModule:', hex(addr))
 
             rbx.mem.write_bool(addr, True)
-            rbx.mem.write_int(plm.address + 0x160, 0)
+            rbx.mem.write_int(plm.address + 0x160, 0) ## offset by theholytorch, thanks!
 
             print('set PlayerListManager.ModuleState to 0')
 
-            with open(luau_modules / 'init.bin', 'rb') as f:
+            with open(luauModules / 'init.bin', 'rb') as f:
                 bytecode = f.read()
             print(bytecode)
 
@@ -128,19 +129,19 @@ class Executor:
 
             print('replace bytecode in Jest', '\n')
 
-            bridge.init_received_event.clear()
+            bridge.initReceivedEvent.clear()
 
-            oldfg = win32gui.GetForegroundWindow()
-            force_foreground(hwnd)
+            oldForegroundHwnd = win32gui.GetForegroundWindow()
+            forceForeground(hwnd)
             time.sleep(0.05)
 
             pydirectinput.press('esc')
-            bridge.init_received_event.wait(timeout=0.6)
+            bridge.initReceivedEvent.wait(timeout=0.6)
             time.sleep(0.05)
             revert()
             pydirectinput.press('esc')
-            if oldfg and oldfg != hwnd:
-                force_foreground(oldfg)
+            if oldForegroundHwnd and oldForegroundHwnd != hwnd:
+                forceForeground(oldForegroundHwnd)
 
             print('reverted bytecode replacement', '\n')
 
@@ -151,7 +152,7 @@ class Executor:
                 time.sleep(0.02)
 
             if self.injected:
-                self._handled_dms.add(dm.address)
+                self._handledDms.add(dm.address)
                 print('Injected')
         finally:
             self._injecting = False
@@ -163,52 +164,52 @@ class Executor:
         rbx = self.sdk
         game = rbx.datamodel
 
-        coregui: sdk.Instance = game.find_first_child('CoreGui')
-        root: sdk.Instance = coregui.find_first_child('_funnyexecutor')
+        coreGui: sdk.Instance = game.findFirstChild('CoreGui')
+        root: sdk.Instance = coreGui.findFirstChild('_funnyexecutor')
 
         if root is None:
             raise ExecutionError("Failed to get instances neccessary for execution (has injection failed?)")
 
-        upd: sdk.BoolValue = root.find_first_child('UpdateIndicator')
+        updateIndicator: sdk.BoolValue = root.findFirstChild('UpdateIndicator')
 
-        bridge.set_source(Luau.compile(source))
-        upd.set_value(not upd.get_value())
+        bridge.setSource(Luau.compile(source))
+        updateIndicator.setValue(not updateIndicator.getValue())
 
         print("Executed")
 
-def get_sdk():
+def getSdk():
     return sdk.Roblox()
 
-def check_process_by_name(process_name):
+def checkProcessByName(processName):
     for proc in psutil.process_iter(['name']):
         try:
-            if proc.name().lower() == process_name.lower():
+            if proc.name().lower() == processName.lower():
                 return proc.pid
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
     return False
 
-def process_has_window(target_pid):
-    has_window = False
+def processHasWindow(targetPid):
+    hasWindow = False
 
-    def enum_callback(hwnd, extra):
-        nonlocal has_window
+    def enumCallback(hwnd, extra):
+        nonlocal hasWindow
         if win32gui.IsWindowVisible(hwnd):
-            _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
-            if win_pid == target_pid:
-                has_window = True
+            _, windowPid = win32process.GetWindowThreadProcessId(hwnd)
+            if windowPid == targetPid:
+                hasWindow = True
                 return False
         return True
-    win32gui.EnumWindows(enum_callback, None)
-    return has_window
+    win32gui.EnumWindows(enumCallback, None)
+    return hasWindow
 
-def roblox_open():
+def robloxOpen():
     try:
-        if not check_process_by_name('RobloxPlayerBeta.exe'):
+        if not checkProcessByName('RobloxPlayerBeta.exe'):
             return False
         ph = pymem.Pymem('RobloxPlayerBeta.exe').process_handle
         if ph:
-            if sdk.get_hwnd(ph):
+            if sdk.getHwnd(ph):
                 return True
             else:
                 return False

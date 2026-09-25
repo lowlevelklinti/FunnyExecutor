@@ -3,22 +3,22 @@ scripts = {
     'init': ['Workspace', 'BinSource']
 
 }
-sdk = FAPI.get_sdk()
-module_path = '../FAPI/luau\\'
+sdk = FAPI.getSdk()
+modulePath = '../FAPI/luau\\'
 
-print(f'-- dumping {len(scripts)} script(s) --')
+print(f'dumping {len(scripts)} script(s)')
 
 for fn, path in scripts.items():
     script = sdk.datamodel
     for i in path:
-        script = script.find_first_child(i)
+        script = script.findFirstChild(i)
         if script is None:
             print('ERROR: could not find', '.'.join(path), '- are you loaded into the published place?')
             exit(1)
-    file = module_path+fn+'.bin'
+    file = modulePath+fn+'.bin'
 
     with open(file, 'wb') as f:
         print('Dumping', '.'.join(path), '->', file)
-        f.write(script.get_authentic_bytecode())
+        f.write(script.getAuthenticBytecode())
 
-print("-- finished --")
+print("ok")

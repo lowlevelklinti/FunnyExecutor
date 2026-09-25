@@ -7,10 +7,10 @@ import pymem
 from . import offsets
 
 class CustomOffsets:
-    module_bytecode = 0x128
-    bytecode_size = 0x28
-    bytecode_ptr = 0x18
-    local_bytecode = 0x180
+    moduleBytecode = 0x128
+    bytecodeSize = 0x28
+    bytecodePtr = 0x18
+    localBytecode = 0x180
 
 class SdkError(Exception): pass
 
@@ -36,33 +36,29 @@ class Roblox:
     @property
     def datamodel(self):
         try:
-            fakedm = self.mem.read_ulonglong(self.mem.base_address + self.offsets.fake_datamodel_ptr)
-            realdm = self.mem.read_ulonglong(fakedm + self.offsets.real_datamodel_ptr)
+            fakedm = self.mem.read_ulonglong(self.mem.base_address + self.offsets.fakeDatamodelPtr)
+            realdm = self.mem.read_ulonglong(fakedm + self.offsets.realDatamodelPtr)
             if not realdm:
                 return None
             return Instance(self, realdm)
         except:
             return None
 
-    def from_class_name(self, x):
+    def fromClassName(self, x):
         x = Instance(self, x)
-        name = x.class_name
+        name = x.className
         if name in classes:
             return classes[name](self, x.address)
         else:
             return x
 
-    def set_fps_cap(self, fps: int):
-        offset = self.offsets.fflag_task_scheduler_target_fps
-        if not offset:
-            raise SdkError('FPS cap fflag offset unavailable for this version')
+    def setFpsCap(self, fps: int):
+        offset = self.offsets.fflagTaskSchedulerTargetFps
         addr = self.mem.base_address + offset
         self.mem.write_int(addr, fps)
 
-    def get_fps_cap(self) -> int:
-        offset = self.offsets.fflag_task_scheduler_target_fps
-        if not offset:
-            raise SdkError('FPS cap fflag offset unavailable for this version')
+    def getFpsCap(self) -> int:
+        offset = self.offsets.fflagTaskSchedulerTargetFps
         return self.mem.read_int(self.mem.base_address + offset)
 
 class Instance:
@@ -70,15 +66,15 @@ class Instance:
         self.memory = rbx.mem
         self.offsets = rbx.offsets
         self.address = addr
-        self._rbx = rbx
+        self._roblox = rbx
 
     @property
     def name(self):
         try:
             if not self.address:
                 return None
-            container = self.memory.read_ulonglong(self.address + self.offsets.ins_name_container)
-            ptr = container + self.offsets.ins_name
+            container = self.memory.read_ulonglong(self.address + self.offsets.insNameContainer)
+            ptr = container + self.offsets.insName
             try: return self.memory.read_string(self.memory.read_ulonglong(ptr))
             except: pass
             try: return self.memory.read_string(ptr)
@@ -88,9 +84,9 @@ class Instance:
         return None
 
     @property
-    def class_name(self):
-        desc = self.memory.read_ulonglong(self.address + self.offsets.ins_class_desc)
-        name = self.memory.read_ulonglong(desc + self.offsets.ins_class_name)
+    def className(self):
+        desc = self.memory.read_ulonglong(self.address + self.offsets.insClassDesc)
+        name = self.memory.read_ulonglong(desc + self.offsets.insClassName)
 
         if name:
             return self.memory.read_string(name)
@@ -98,22 +94,22 @@ class Instance:
 
     @property
     def parent(self):
-        ptr = self.address + self.offsets.ins_parent
+        ptr = self.address + self.offsets.insParent
         par = self.memory.read_ulonglong(ptr)
         if par:
-            return Instance(self._rbx, par)
+            return Instance(self._roblox, par)
         return None
 
-    def get_children(self):
+    def getChildren(self):
         base = self.address
 
-        children = self.memory.read_ulonglong(base + self.offsets.ins_children_start)
+        children = self.memory.read_ulonglong(base + self.offsets.insChildrenStart)
 
         if children == 0:
             return []
 
         start = self.memory.read_ulonglong(children)
-        end = self.memory.read_ulonglong(children + self.offsets.ins_children_end)
+        end = self.memory.read_ulonglong(children + self.offsets.insChildrenEnd)
 
         size = 16
 
@@ -128,12 +124,12 @@ class Instance:
 
         for ptr in range(start, end, size):
             try:
-                child_addr = self.memory.read_ulonglong(ptr)
+                childAddress = self.memory.read_ulonglong(ptr)
 
-                if child_addr == 0:
+                if childAddress == 0:
                     continue
 
-                ins = self._rbx.from_class_name(child_addr)
+                ins = self._roblox.fromClassName(childAddress)
 
                 children.append(ins)
 
@@ -141,38 +137,38 @@ class Instance:
 
         return children
 
-    def find_first_child(self, name, recursive=False):
-        children = self.get_descendants() if recursive else self.get_children()
+    def findFirstChild(self, name, recursive=False):
+        children = self.getDescendants() if recursive else self.getChildren()
         for i in children:
             if i and i.name == name:
                 return i
 
         return None
 
-    def wait_for_child(self, name, timeout):
+    def waitForChild(self, name, timeout):
         child = None
         finish = time.time()+timeout
         while not child and time.time() < finish:
-            child = self.find_first_child(name)
+            child = self.findFirstChild(name)
             time.sleep(0.02)
 
         return child
 
-    def find_first_child_by_class(self, name, recursive=False):
-        children = self.get_descendants() if recursive else self.get_children()
+    def findFirstChildByClass(self, name, recursive=False):
+        children = self.getDescendants() if recursive else self.getChildren()
         for i in children:
-            if i and i.class_name == name:
+            if i and i.className == name:
                 return i
 
         return None
 
-    def get_descendants(self):
+    def getDescendants(self):
         l = []
 
         def loop(ins):
-            for i in ins.get_children():
+            for i in ins.getChildren():
                 l.append(i)
-                if len(i.get_children()) > 0:
+                if len(i.getChildren()) > 0:
                     loop(i)
 
         loop(self)
@@ -183,42 +179,42 @@ class Instance:
         for i in path:
             if not current:
                 return None
-            current = current.find_first_child(i)
+            current = current.findFirstChild(i)
             if not current:
                 return None
         return current
 
-    def get_full_name(self):
-        if self.class_name == 'DataModel':
+    def getFullName(self):
+        if self.className == 'DataModel':
             return 'game'
 
         parent = self
         path = [self.name]
-        while parent.class_name != 'DataModel':
+        while parent.className != 'DataModel':
             parent = parent.parent
-            path.append('game' if parent.class_name == 'DataModel' else parent.name)
+            path.append('game' if parent.className == 'DataModel' else parent.name)
 
         return '.'.join(path[::-1])
 
     def __repr__(self):
-        return f'<{self.class_name} "{self.name}">'
+        return f'<{self.className} "{self.name}">'
 
-MEM_COMMIT = 0x00001000
-MEM_RESERVE = 0x00002000
-MEM_RELEASE = 0x00008000
-PAGE_READWRITE = 0x04
+memCommit = 0x00001000
+memReserve = 0x00002000
+memRelease = 0x00008000
+pageReadwrite = 0x04
 
 class Script(Instance):
     def exploit(self, bytecode: bytes):
-        ptr = self.memory.read_ulonglong(self.address + CustomOffsets.module_bytecode)
-        bytecodebuf = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_ptr)
-        size = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_size)
+        ptr = self.memory.read_ulonglong(self.address + CustomOffsets.moduleBytecode)
+        bytecodebuf = self.memory.read_ulonglong(ptr + CustomOffsets.bytecodePtr)
+        size = self.memory.read_ulonglong(ptr + CustomOffsets.bytecodeSize)
 
         buffer = pymem.memory.allocate_memory(
             self.memory.process_handle,
             len(bytecode),
-            allocation_type=MEM_COMMIT | MEM_RESERVE,
-            protection_type=PAGE_READWRITE
+            allocation_type=memCommit | memReserve,
+            protection_type=pageReadwrite
         )
 
         self.memory.write_bytes(buffer, bytecode, len(bytecode))
@@ -227,63 +223,63 @@ class Script(Instance):
             print("writing error")
             return lambda: None
 
-        self.memory.write_ulonglong(ptr + CustomOffsets.bytecode_ptr, buffer)
-        self.memory.write_ulonglong(ptr + CustomOffsets.bytecode_size, len(bytecode))
+        self.memory.write_ulonglong(ptr + CustomOffsets.bytecodePtr, buffer)
+        self.memory.write_ulonglong(ptr + CustomOffsets.bytecodeSize, len(bytecode))
 
         return lambda: (
-            self.memory.write_ulonglong(ptr + CustomOffsets.bytecode_ptr, bytecodebuf),
-            self.memory.write_ulonglong(ptr + CustomOffsets.bytecode_size, size),
-            pymem.memory.free_memory(self.memory.process_handle, buffer, free_type=MEM_RELEASE)
+            self.memory.write_ulonglong(ptr + CustomOffsets.bytecodePtr, bytecodebuf),
+            self.memory.write_ulonglong(ptr + CustomOffsets.bytecodeSize, size),
+            pymem.memory.free_memory(self.memory.process_handle, buffer, free_type=memRelease)
         )
 
-    def get_authentic_bytecode(self):  # roblox KEEPS changing the damn offsets omg bro
-        offset = CustomOffsets.module_bytecode
-        if self.class_name == 'LocalScript':
-            offset = CustomOffsets.local_bytecode
+    def getAuthenticBytecode(self):  # roblox KEEPS changing the damn offsets omg bro
+        offset = CustomOffsets.moduleBytecode
+        if self.className == 'LocalScript':
+            offset = CustomOffsets.localBytecode
 
         ptr = self.memory.read_ulonglong(self.address + offset)
-        buffer = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_ptr)
-        size = self.memory.read_ulonglong(ptr + CustomOffsets.bytecode_size)
+        buffer = self.memory.read_ulonglong(ptr + CustomOffsets.bytecodePtr)
+        size = self.memory.read_ulonglong(ptr + CustomOffsets.bytecodeSize)
 
         if buffer == 0 or size == 0:
             return b''
 
         return self.memory.read_bytes(buffer, size)
 
-    def set_iscorescript(self, val):
+    def setIsCoreScript(self, val):
         self.memory.write_bool(self.address+0, val)
 
 class StringValue(Instance):
     def __init__(self, rbx: Roblox, addr):
         super().__init__(rbx, addr)
 
-        self.content_ptr = self.memory.read_ulonglong(addr+self.offsets.value)
-        self.size_ptr = addr+self.offsets.value+self.offsets.string_length
-        self._is_buffer = False
+        self.contentPtr = self.memory.read_ulonglong(addr+self.offsets.value)
+        self.sizePtr = addr+self.offsets.value+self.offsets.stringLength
+        self._isBuffer = False
 
-    def set_value(self, content: str):
-        if self._is_buffer:
-            pymem.memory.free_memory(self.memory.process_handle, self.content_ptr, free_type=MEM_RELEASE)
+    def setValue(self, content: str):
+        if self._isBuffer:
+            pymem.memory.free_memory(self.memory.process_handle, self.contentPtr, free_type=memRelease)
 
-        self.content_ptr = pymem.memory.allocate_memory(
+        self.contentPtr = pymem.memory.allocate_memory(
             self.memory.process_handle,
             len(content),
-            allocation_type=MEM_COMMIT | MEM_RESERVE,
-            protection_type=PAGE_READWRITE
+            allocation_type=memCommit | memReserve,
+            protection_type=pageReadwrite
         )
-        self.memory.write_string(self.content_ptr, content)
-        self.memory.write_ulonglong(self.address+self.offsets.value, self.content_ptr)
-        self.memory.write_int(self.size_ptr, len(content))
-        self._is_buffer = True
+        self.memory.write_string(self.contentPtr, content)
+        self.memory.write_ulonglong(self.address+self.offsets.value, self.contentPtr)
+        self.memory.write_int(self.sizePtr, len(content))
+        self._isBuffer = True
 
-    def get_value(self):
-        return self.memory.read_string(self.content_ptr, self.memory.read_int(self.size_ptr))
+    def getValue(self):
+        return self.memory.read_string(self.contentPtr, self.memory.read_int(self.sizePtr))
 
 class BoolValue(Instance):
-    def set_value(self, val: bool):
+    def setValue(self, val: bool):
         self.memory.write_bool(self.address+self.offsets.value, val)
 
-    def get_value(self):
+    def getValue(self):
         return self.memory.read_bool(self.address+self.offsets.value)
 
 class ObjectValue(Instance):
@@ -292,7 +288,7 @@ class ObjectValue(Instance):
         ptr = self.memory.read_ulonglong(self.address + self.offsets.value)
         if not ptr:
             return None
-        return self._rbx.from_class_name(ptr)
+        return self._roblox.fromClassName(ptr)
 
 classes = {
     'Instance': Instance,
@@ -303,18 +299,18 @@ classes = {
     "ObjectValue": ObjectValue
 }
 
-def get_hwnd(proc_handle):
-    target_pid = win32process.GetProcessId(proc_handle)
-    matching_hwnds = []
+def getHwnd(processHandle):
+    targetPid = win32process.GetProcessId(processHandle)
+    matchingHwnds = []
 
-    def enum_windows_callback(hwnd, _):
-        _, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+    def enumWindowsCallback(hwnd, _):
+        _, windowPid = win32process.GetWindowThreadProcessId(hwnd)
 
-        if window_pid == target_pid:
+        if windowPid == targetPid:
             if win32gui.IsWindowVisible(hwnd):
-                matching_hwnds.append(hwnd)
+                matchingHwnds.append(hwnd)
         return True
 
-    win32gui.EnumWindows(enum_windows_callback, None)
+    win32gui.EnumWindows(enumWindowsCallback, None)
 
-    return matching_hwnds
+    return matchingHwnds

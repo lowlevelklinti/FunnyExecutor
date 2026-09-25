@@ -1,19 +1,14 @@
-# -*- coding: utf-8 -*-
-
 from PySide6.QtCore import QCoreApplication, QMetaObject, QSize, QByteArray, Qt
 from PySide6.QtGui import QAction, QFont, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QMenu, QPushButton, QStackedWidget, QTabBar, QTreeWidget, QVBoxLayout, QWidget)
 
-RAIL_BG = "#0f0f0f"
-PANEL_BG = "#131313"
-DIVIDER = "#1e1e1e"
-TRAFFIC_RED = "#ff5561"
-TRAFFIC_YELLOW = "#f6b933"
-TRAFFIC_GREEN = "#27c03d"
-TEXT_DIM = "#8a8a8a"
-TEXT_ACTIVE = "#e6e6e6"
+railBg = "#0f0f0f"
+panelBg = "#131313"
+divider = "#1e1e1e"
+textDim = "#8a8a8a"
+textActive = "#e6e6e6"
 
 class Icons:
     execute = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>"""
@@ -30,8 +25,13 @@ class Icons:
 
     settingsTab = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings preview-icon"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>"""
 
+    exitIcon = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x preview-icon"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"""
 
-def _svg_pixmap(svg, color, size):
+    minimizeIcon = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-minus preview-icon"><path d="M5 12h14"/></svg>"""
+
+    resizeIcon = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-square preview-icon"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"""
+
+def _svgPixmap(svg, color, size):
     data = svg.replace('stroke="white"', 'stroke="%s"' % color).replace('fill="white"', 'fill="%s"' % color)
     renderer = QSvgRenderer(QByteArray(data.encode("utf-8")))
     scale = 2
@@ -44,19 +44,19 @@ def _svg_pixmap(svg, color, size):
     return pm
 
 
-def svg_icon(svg, color, size=18):
-    return QIcon(_svg_pixmap(svg, color, size))
+def svgIcon(svg, color, size=18):
+    return QIcon(_svgPixmap(svg, color, size))
 
 
-def nav_icon(svg, size=20, dim=TEXT_DIM, active=TEXT_ACTIVE):
+def navIcon(svg, size=20, dim=textDim, active=textActive):
     icon = QIcon()
-    icon.addPixmap(_svg_pixmap(svg, dim, size), QIcon.Mode.Normal)
-    icon.addPixmap(_svg_pixmap(svg, active, size), QIcon.Mode.Active)
-    icon.addPixmap(_svg_pixmap(svg, active, size), QIcon.Mode.Selected)
+    icon.addPixmap(_svgPixmap(svg, dim, size), QIcon.Mode.Normal)
+    icon.addPixmap(_svgPixmap(svg, active, size), QIcon.Mode.Active)
+    icon.addPixmap(_svgPixmap(svg, active, size), QIcon.Mode.Selected)
     return icon
 
 
-STYLE = """
+style = """
 #centralwidget { background-color: #131313; }
 #iconRail { background-color: #0f0f0f; border-right: 1px solid #1e1e1e; }
 #sidebar { background-color: #131313; border-right: 1px solid #1e1e1e; }
@@ -78,6 +78,14 @@ QToolTip { background-color: #1b1b1b; color: #d0d0d0; border: 1px solid #2a2a2a;
     background-color: #1e1e1e;
 }
 #iconRail QPushButton:checked { background-color: #1e1e1e; }
+#iconRail QPushButton[active="true"] { background-color: #1e1e1e; }
+#iconRail QPushButton[active="true"]:hover { background-color: #1e1e1e; }
+#yellowBtn, #greenBtn, #redBtn {
+    background: transparent; border: none; border-radius: 4px;
+}
+#yellowBtn:hover, #greenBtn:hover, #redBtn:hover { background-color: #1e1e1e; }
+#yellowBtn:pressed, #greenBtn:pressed, #redBtn:pressed { background-color: #2a2a2a; }
+#yellowBtn:checked, #greenBtn:checked, #redBtn:checked { background-color: transparent; }
 
 QLineEdit#searchEdit {
     background-color: #1a1a1a; border: 1px solid #1e1e1e; border-radius: 6px;
@@ -89,8 +97,15 @@ QTreeWidget#scriptTree {
     color: #9a9a9a; font-size: 12px;
 }
 QTreeWidget#scriptTree::item { height: 30px; border: none; }
-QTreeWidget#scriptTree::item:hover { color: #cfcfcf; }
-QTreeWidget#scriptTree::item:selected { color: #ffffff; background-color: #1e1e1e; border-radius: 4px; }
+QTreeWidget#scriptTree::item:hover {
+    color: #ffffff; background-color: #1e1e1e; border: none; border-radius: 4px;
+}
+QTreeWidget#scriptTree::item:selected {
+    color: #ffffff; background-color: #1e1e1e; border: none; border-radius: 4px;
+}
+QTreeWidget#scriptTree::item:selected:hover {
+    color: #ffffff; background-color: #1e1e1e; border: none; border-radius: 4px;
+}
 
 QTabBar#tabBar { qproperty-drawBase: 0; }
 QTabBar#tabBar::tab {
@@ -125,8 +140,8 @@ class Ui_MainWindow(object):
         MainWindow.resize(1070, 615)
         MainWindow.setMinimumSize(QSize(1200, 600))
 
-        self.actionExit_Alt_F4 = QAction(MainWindow)
-        self.actionExit_Alt_F4.setObjectName(u"actionExit_Alt_F4")
+        self.actionExitAltF4 = QAction(MainWindow)
+        self.actionExitAltF4.setObjectName(u"actionExit_Alt_F4")
         self.actionInject = QAction(MainWindow)
         self.actionInject.setObjectName(u"actionInject")
         self.actionExecute = QAction(MainWindow)
@@ -137,18 +152,18 @@ class Ui_MainWindow(object):
         self.actionImport.setObjectName(u"actionImport")
         self.actionInfo = QAction(MainWindow)
         self.actionInfo.setObjectName(u"actionInfo")
-        self.actionSave_Tabs = QAction(MainWindow)
-        self.actionSave_Tabs.setObjectName(u"actionSave_Tabs")
-        self.actionNew_Tab = QAction(MainWindow)
-        self.actionNew_Tab.setObjectName(u"actionNew_Tab")
-        self.actionClear_Tabs = QAction(MainWindow)
-        self.actionClear_Tabs.setObjectName(u"actionClear_Tabs")
+        self.actionSaveTabs = QAction(MainWindow)
+        self.actionSaveTabs.setObjectName(u"actionSave_Tabs")
+        self.actionNewTab = QAction(MainWindow)
+        self.actionNewTab.setObjectName(u"actionNew_Tab")
+        self.actionClearTabs = QAction(MainWindow)
+        self.actionClearTabs.setObjectName(u"actionClear_Tabs")
         self.actionBtools = QAction(MainWindow)
         self.actionBtools.setObjectName(u"actionBtools")
-        self.actionTop_Most = QAction(MainWindow)
-        self.actionTop_Most.setObjectName(u"actionTop_Most")
-        self.actionTop_Most.setCheckable(True)
-        self.actionTop_Most.setChecked(True)
+        self.actionTopMost = QAction(MainWindow)
+        self.actionTopMost.setObjectName(u"actionTop_Most")
+        self.actionTopMost.setCheckable(True)
+        self.actionTopMost.setChecked(True)
 
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
@@ -169,15 +184,15 @@ class Ui_MainWindow(object):
         self.editorNavBtn.setCheckable(True)
         self.editorNavBtn.setChecked(True)
         self.editorNavBtn.setToolTip(u"Editor")
-        self.editorNavBtn.setIcon(nav_icon(Icons.editorTab))
+        self.editorNavBtn.setIcon(navIcon(Icons.editorTab))
         self.editorNavBtn.setIconSize(QSize(20, 20))
 
         self.filesNavBtn = QPushButton(self.iconRail)
         self.filesNavBtn.setObjectName(u"filesNavBtn")
         self.filesNavBtn.setFixedSize(36, 36)
         self.filesNavBtn.setCheckable(True)
-        self.filesNavBtn.setToolTip(u"Toggle sidebar")
-        self.filesNavBtn.setIcon(nav_icon(Icons.folder))
+        self.filesNavBtn.setToolTip(u"File Explorer")
+        self.filesNavBtn.setIcon(navIcon(Icons.folder))
         self.filesNavBtn.setIconSize(QSize(20, 20))
 
         self.settingsNavBtn = QPushButton(self.iconRail)
@@ -185,7 +200,7 @@ class Ui_MainWindow(object):
         self.settingsNavBtn.setFixedSize(36, 36)
         self.settingsNavBtn.setCheckable(True)
         self.settingsNavBtn.setToolTip(u"Settings")
-        self.settingsNavBtn.setIcon(nav_icon(Icons.settingsTab))
+        self.settingsNavBtn.setIcon(navIcon(Icons.settingsTab))
         self.settingsNavBtn.setIconSize(QSize(20, 20))
 
         railLayout.addWidget(self.editorNavBtn, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -240,7 +255,7 @@ class Ui_MainWindow(object):
         self.newTabButton.setObjectName(u"newTabButton")
         self.newTabButton.setFixedSize(30, 30)
         self.newTabButton.setToolTip(u"New Tab")
-        self.newTabButton.setIcon(nav_icon(Icons.newTab, 16))
+        self.newTabButton.setIcon(navIcon(Icons.newTab, 16))
         self.newTabButton.setIconSize(QSize(16, 16))
         stripLayout.addWidget(self.tabBar)
         stripLayout.addWidget(self.newTabButton)
@@ -248,24 +263,33 @@ class Ui_MainWindow(object):
 
         self.yellowBtn = QPushButton(self.tabStrip)
         self.yellowBtn.setObjectName(u"yellowBtn")
-        self.yellowBtn.setFixedSize(14, 14)
+        self.yellowBtn.setFixedSize(28, 28)
+        self.yellowBtn.setCheckable(False)
+        self.yellowBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.yellowBtn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.yellowBtn.setToolTip(u"Minimize")
-        self.yellowBtn.setStyleSheet("QPushButton{background-color:%s;border:none;border-radius:7px;}QPushButton:hover{background-color:#ffc94d;}" % TRAFFIC_YELLOW)
+        self.yellowBtn.setIcon(navIcon(Icons.minimizeIcon, 16))
+        self.yellowBtn.setIconSize(QSize(16, 16))
 
         self.greenBtn = QPushButton(self.tabStrip)
         self.greenBtn.setObjectName(u"greenBtn")
-        self.greenBtn.setFixedSize(14, 14)
+        self.greenBtn.setFixedSize(28, 28)
+        self.greenBtn.setCheckable(False)
+        self.greenBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.greenBtn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.greenBtn.setToolTip(u"Fullscreen")
-        self.greenBtn.setStyleSheet("QPushButton{background-color:%s;border:none;border-radius:7px;}QPushButton:hover{background-color:#33d64c;}" % TRAFFIC_GREEN)
+        self.greenBtn.setToolTip(u"Maximize")
+        self.greenBtn.setIcon(navIcon(Icons.resizeIcon, 16))
+        self.greenBtn.setIconSize(QSize(16, 16))
 
         self.redBtn = QPushButton(self.tabStrip)
         self.redBtn.setObjectName(u"redBtn")
-        self.redBtn.setFixedSize(14, 14)
+        self.redBtn.setFixedSize(28, 28)
+        self.redBtn.setCheckable(False)
+        self.redBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.redBtn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.redBtn.setToolTip(u"Exit")
-        self.redBtn.setStyleSheet("QPushButton{background-color:%s;border:none;border-radius:7px;}QPushButton:hover{background-color:#ff6b75;}" % TRAFFIC_RED)
+        self.redBtn.setToolTip(u"Close")
+        self.redBtn.setIcon(navIcon(Icons.exitIcon, 16))
+        self.redBtn.setIconSize(QSize(16, 16))
 
         stripLayout.addWidget(self.yellowBtn)
         stripLayout.addWidget(self.greenBtn)
@@ -291,13 +315,13 @@ class Ui_MainWindow(object):
         self.injectButton.setObjectName(u"injectButton")
         self.injectButton.setFixedSize(34, 30)
         self.injectButton.setToolTip(u"Inject")
-        self.injectButton.setIcon(nav_icon(Icons.inject, 18))
+        self.injectButton.setIcon(navIcon(Icons.inject, 18))
         self.injectButton.setIconSize(QSize(18, 18))
         self.executeButton = QPushButton(self.breadcrumb)
         self.executeButton.setObjectName(u"executeButton")
         self.executeButton.setFixedSize(34, 30)
         self.executeButton.setToolTip(u"Execute")
-        self.executeButton.setIcon(nav_icon(Icons.execute, 18, dim="#9fd6ab", active="#c8f0d1"))
+        self.executeButton.setIcon(navIcon(Icons.execute, 18, dim="#9fd6ab", active="#c8f0d1"))
         self.executeButton.setIconSize(QSize(18, 18))
         crumbLayout.addWidget(self.pathLabel)
         crumbLayout.addStretch()
@@ -337,18 +361,18 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
 
         self.settingsMenu = QMenu(MainWindow)
-        self.settingsMenu.addAction(self.actionNew_Tab)
-        self.settingsMenu.addAction(self.actionSave_Tabs)
+        self.settingsMenu.addAction(self.actionNewTab)
+        self.settingsMenu.addAction(self.actionSaveTabs)
         self.settingsMenu.addSeparator()
         self.settingsMenu.addAction(self.actionImport)
         self.settingsMenu.addAction(self.actionExport)
         self.settingsMenu.addSeparator()
-        self.settingsMenu.addAction(self.actionClear_Tabs)
+        self.settingsMenu.addAction(self.actionClearTabs)
         self.settingsMenu.addSeparator()
-        self.settingsMenu.addAction(self.actionTop_Most)
-        self.settingsMenu.addAction(self.actionExit_Alt_F4)
+        self.settingsMenu.addAction(self.actionTopMost)
+        self.settingsMenu.addAction(self.actionExitAltF4)
 
-        MainWindow.setStyleSheet(STYLE)
+        MainWindow.setStyleSheet(style)
 
         self.retranslateUi(MainWindow)
 
@@ -356,17 +380,17 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"Funny Executor", None))
-        self.actionExit_Alt_F4.setText(QCoreApplication.translate("MainWindow", u"Exit", None))
+        self.actionExitAltF4.setText(QCoreApplication.translate("MainWindow", u"Exit", None))
         self.actionInject.setText(QCoreApplication.translate("MainWindow", u"Inject", None))
         self.actionExecute.setText(QCoreApplication.translate("MainWindow", u"Execute", None))
         self.actionExport.setText(QCoreApplication.translate("MainWindow", u"Export...", None))
         self.actionImport.setText(QCoreApplication.translate("MainWindow", u"Import...", None))
         self.actionInfo.setText(QCoreApplication.translate("MainWindow", u"Info", None))
-        self.actionSave_Tabs.setText(QCoreApplication.translate("MainWindow", u"Save Tabs", None))
-        self.actionNew_Tab.setText(QCoreApplication.translate("MainWindow", u"New Tab", None))
-        self.actionClear_Tabs.setText(QCoreApplication.translate("MainWindow", u"Clear Tabs", None))
+        self.actionSaveTabs.setText(QCoreApplication.translate("MainWindow", u"Save Tabs", None))
+        self.actionNewTab.setText(QCoreApplication.translate("MainWindow", u"New Tab", None))
+        self.actionClearTabs.setText(QCoreApplication.translate("MainWindow", u"Clear Tabs", None))
         self.actionBtools.setText(QCoreApplication.translate("MainWindow", u"F3X", None))
-        self.actionTop_Most.setText(QCoreApplication.translate("MainWindow", u"On Top", None))
+        self.actionTopMost.setText(QCoreApplication.translate("MainWindow", u"On Top", None))
         self.searchEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search", None))
         self.pathLabel.setText(QCoreApplication.translate("MainWindow", u"Funny Executor", None))
         self.statusLabel.setText(QCoreApplication.translate("MainWindow", u"\u2b24", None))

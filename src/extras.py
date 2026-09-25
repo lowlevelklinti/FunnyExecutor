@@ -4,27 +4,27 @@ from PySide6.QtCore import QRegularExpression, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QPainter
 from PySide6.QtWidgets import QPlainTextEdit, QMessageBox, QWidget
 
-bold_font = 700
+boldFont = 700
 
 _luauRules = None
 
 class LuauHighlighter(QSyntaxHighlighter):
     # debugger
-    _re_block_comment = re.compile(r"--\[\[.*?\]\]", re.DOTALL)
-    _re_line_comment = re.compile(r"--[^\n]*")
-    _re_dstring = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
-    _re_sstring = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'")
+    _reBlockComment = re.compile(r"--\[\[.*?\]\]", re.DOTALL)
+    _reLineComment = re.compile(r"--[^\n]*")
+    _reDstring = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
+    _reSstring = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'")
 
-    _re_local_func = re.compile(r"\blocal\s+function\s+([A-Za-z_]\w*)")
-    _re_local_vars = re.compile(r"\blocal\s+(?!function\b)((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)")
-    _re_func_params = re.compile(r"\bfunction\b[^()]*\(([^)]*)\)")
-    _re_for_in = re.compile(r"\bfor\s+((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)\s+in\b")
-    _re_for_num = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s*=")
-    _re_assign_target = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
-    _re_identifier = re.compile(r"\b[A-Za-z_]\w*\b")
-    _re_table_key = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
-    _re_func_call = re.compile(r"\b([A-Za-z_]\w*)\s*(?=[\({\"'])")
-    _re_global_func = re.compile(r"(?<!\blocal\s)(?<!\blocal\s{2})(?<!\blocal\s{3})\bfunction\s+([A-Za-z_]\w*)")
+    _reLocalFunc = re.compile(r"\blocal\s+function\s+([A-Za-z_]\w*)")
+    _reLocalVars = re.compile(r"\blocal\s+(?!function\b)((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)")
+    _reFuncParams = re.compile(r"\bfunction\b[^()]*\(([^)]*)\)")
+    _reForIn = re.compile(r"\bfor\s+((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)\s+in\b")
+    _reForNum = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s*=")
+    _reAssignTarget = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
+    _reIdentifier = re.compile(r"\b[A-Za-z_]\w*\b")
+    _reTableKey = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
+    _reFuncCall = re.compile(r"\b([A-Za-z_]\w*)\s*(?=[\({\"'])")
+    _reGlobalFunc = re.compile(r"(?<!\blocal\s)(?<!\blocal\s{2})(?<!\blocal\s{3})\bfunction\s+([A-Za-z_]\w*)")
 
     def __init__(self, document):
         super().__init__(document)
@@ -32,24 +32,24 @@ class LuauHighlighter(QSyntaxHighlighter):
         global _luauRules
 
         self.progressiveLimit = None
-        self._last_revision = None
-        self.undefined_ranges = []
-        self.unused_ranges = []
+        self._lastRevision = None
+        self.undefinedRanges = []
+        self.unusedRanges = []
 
         if _luauRules is not None:
             self.rules = _luauRules['rules']
-            self.comment_format = _luauRules['commentFormat']
-            self.block_comment_start = _luauRules['blockCommentStart']
-            self.block_comment_end = _luauRules['blockCommentEnd']
-            self._known_builtins = _luauRules['knownBuiltins']
+            self.commentFormat = _luauRules['commentFormat']
+            self.blockCommentStart = _luauRules['blockCommentStart']
+            self.blockCommentEnd = _luauRules['blockCommentEnd']
+            self._knownBuiltins = _luauRules['knownBuiltins']
             return
 
         self.rules = []
 
         # keywords
-        keyword_format = QTextCharFormat()
-        keyword_format.setForeground(QColor("#8e9ae6"))
-        keyword_format.setFontWeight(bold_font)
+        keywordFormat = QTextCharFormat()
+        keywordFormat.setForeground(QColor("#8e9ae6"))
+        keywordFormat.setFontWeight(boldFont)
         self.keywords = [
             "and", "break", "do", "else", "elseif", "end",
             "for", "function", "if", "in", "local", "nil", "not",
@@ -58,21 +58,21 @@ class LuauHighlighter(QSyntaxHighlighter):
         ]
         for word in self.keywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, keyword_format))
+            self.rules.append((pattern, keywordFormat))
 
         # booleans
-        bool_format = QTextCharFormat()
-        bool_format.setForeground(QColor("#d6cc61"))
-        bool_format.setFontWeight(bold_font)
+        boolFormat = QTextCharFormat()
+        boolFormat.setForeground(QColor("#d6cc61"))
+        boolFormat.setFontWeight(boldFont)
         self.booleans = ['true', 'false']
         for word in self.booleans:
             pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, bool_format))
+            self.rules.append((pattern, boolFormat))
 
         # globals
-        globals_format = QTextCharFormat()
-        globals_format.setForeground(QColor("#d6cc61"))
-        self.globals_keywords = [
+        globalsFormat = QTextCharFormat()
+        globalsFormat.setForeground(QColor("#d6cc61"))
+        self.globalsKeywords = [
             "print", 'math', 'string', 'table',
             'type', 'tonumber', 'tostring', 'error', 'pcall',
             '_G', 'shared', 'game', 'workspace', 'warn', 'pairs', 'ipairs', 'next',
@@ -87,14 +87,14 @@ class LuauHighlighter(QSyntaxHighlighter):
             'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal', 'rawlen',
             'unpack', 'xpcall', 'collectgarbage', 'self',
         ]
-        for word in self.globals_keywords:
+        for word in self.globalsKeywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, globals_format))
+            self.rules.append((pattern, globalsFormat))
 
         # unc
-        unc_format = QTextCharFormat()
-        unc_format.setForeground(QColor("#8e9ae6"))
-        self.unc_keywords = [
+        uncFormat = QTextCharFormat()
+        uncFormat.setForeground(QColor("#8e9ae6"))
+        self.uncKeywords = [
             'getgenv', 'base64encode', 'base64decode', 'crypt',
             'lz4compress', 'lz4decompress', 'loadstring',
             'writefile', 'appendfile', 'readfile', 'isfile',
@@ -122,208 +122,208 @@ class LuauHighlighter(QSyntaxHighlighter):
             'getcallingscript', 'getinstances', 'gethiddenproperty', 'sethiddenproperty',
             'setsimulationradius', 'isscriptable', 'setscriptable', 'getcustomasset'
         ]
-        for word in self.unc_keywords:
+        for word in self.uncKeywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, unc_format))
+            self.rules.append((pattern, uncFormat))
 
         # numbers
-        number_format = QTextCharFormat()
-        number_format.setForeground(QColor("#d6cc61"))
-        self.rules.append((QRegularExpression(r"\b\d+(\.\d+)?\b"), number_format))
+        numberFormat = QTextCharFormat()
+        numberFormat.setForeground(QColor("#d6cc61"))
+        self.rules.append((QRegularExpression(r"\b\d+(\.\d+)?\b"), numberFormat))
 
         # member
-        member_format = QTextCharFormat()
-        member_format.setForeground(QColor("#7b99ec"))
+        memberFormat = QTextCharFormat()
+        memberFormat.setForeground(QColor("#7b99ec"))
 
-        member_pattern = QRegularExpression(r"(?<=\.)[a-zA-Z_][a-zA-Z0-9_]*\b")
-        self.rules.append((member_pattern, member_format))
+        memberPattern = QRegularExpression(r"(?<=\.)[a-zA-Z_][a-zA-Z0-9_]*\b")
+        self.rules.append((memberPattern, memberFormat))
 
         # functions
-        function_format = QTextCharFormat()
-        function_format.setForeground(QColor("#7b99ec"))
+        functionFormat = QTextCharFormat()
+        functionFormat.setForeground(QColor("#7b99ec"))
 
         # func calls
-        pat = '|'.join(self.unc_keywords + self.globals_keywords)
-        call_pattern = QRegularExpression(r"\b(?!(?:"+pat+r")\b)[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()")
-        self.rules.append((call_pattern, function_format))
+        pat = '|'.join(self.uncKeywords + self.globalsKeywords)
+        callPattern = QRegularExpression(r"\b(?!(?:"+pat+r")\b)[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()")
+        self.rules.append((callPattern, functionFormat))
 
         # func defs
-        def_pattern = QRegularExpression(r"\bfunction\s+\K[a-zA-Z_][a-zA-Z0-9_]*\b")
-        self.rules.append((def_pattern, function_format))
+        defPattern = QRegularExpression(r"\bfunction\s+\K[a-zA-Z_][a-zA-Z0-9_]*\b")
+        self.rules.append((defPattern, functionFormat))
 
         # strings
-        string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#abd4b4"))
-        self.rules.append((QRegularExpression('"[^"\\\\]*(\\\\.[^"\\\\]*)*"'), string_format))
-        self.rules.append((QRegularExpression("'[^'\\\\]*(\\\\.[^'\\\\]*)*'"), string_format))
+        stringFormat = QTextCharFormat()
+        stringFormat.setForeground(QColor("#abd4b4"))
+        self.rules.append((QRegularExpression('"[^"\\\\]*(\\\\.[^"\\\\]*)*"'), stringFormat))
+        self.rules.append((QRegularExpression("'[^'\\\\]*(\\\\.[^'\\\\]*)*'"), stringFormat))
 
         # comment
-        self.comment_format = QTextCharFormat()
-        self.comment_format.setForeground(QColor("#646464"))
-        self.comment_format.setFontItalic(True)
-        self.rules.append((QRegularExpression("--[^\n]*"), self.comment_format))
+        self.commentFormat = QTextCharFormat()
+        self.commentFormat.setForeground(QColor("#646464"))
+        self.commentFormat.setFontItalic(True)
+        self.rules.append((QRegularExpression("--[^\n]*"), self.commentFormat))
 
-        self.block_comment_start = QRegularExpression(r"--\[\[")
-        self.block_comment_end = QRegularExpression(r"\]\]")
+        self.blockCommentStart = QRegularExpression(r"--\[\[")
+        self.blockCommentEnd = QRegularExpression(r"\]\]")
 
-        self.undefined_format = QTextCharFormat()
-        self.undefined_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-        self.undefined_format.setUnderlineColor(QColor("#ff5561"))
+        self.undefinedFormat = QTextCharFormat()
+        self.undefinedFormat.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+        self.undefinedFormat.setUnderlineColor(QColor("#ff5561"))
 
-        self._known_builtins = set(self.keywords) | set(self.booleans) | \
-            set(self.globals_keywords) | set(self.unc_keywords)
+        self._knownBuiltins = set(self.keywords) | set(self.booleans) | \
+            set(self.globalsKeywords) | set(self.uncKeywords)
 
         _luauRules = {
             'rules': self.rules,
-            'commentFormat': self.comment_format,
-            'blockCommentStart': self.block_comment_start,
-            'blockCommentEnd': self.block_comment_end,
-            'knownBuiltins': self._known_builtins,
+            'commentFormat': self.commentFormat,
+            'blockCommentStart': self.blockCommentStart,
+            'blockCommentEnd': self.blockCommentEnd,
+            'knownBuiltins': self._knownBuiltins,
         }
 
-    def _find_table_key_positions(self, text):
-        key_positions = set()
-        brace_depth = 0
-        brace_starts = []
+    def _findTableKeyPositions(self, text):
+        keyPositions = set()
+        braceDepth = 0
+        braceStarts = []
         for i, ch in enumerate(text):
             if ch == '{':
-                brace_depth += 1
-                brace_starts.append(i)
+                braceDepth += 1
+                braceStarts.append(i)
             elif ch == '}':
-                if brace_depth > 0:
-                    brace_depth -= 1
-                    brace_starts.pop()
+                if braceDepth > 0:
+                    braceDepth -= 1
+                    braceStarts.pop()
 
-        brace_ranges = []
+        braceRanges = []
         stack = []
         for i, ch in enumerate(text):
             if ch == '{':
                 stack.append(i)
             elif ch == '}' and stack:
                 start = stack.pop()
-                brace_ranges.append((start, i))
+                braceRanges.append((start, i))
 
-        re_tkey = re.compile(r'\b([A-Za-z_]\w*)\s*=(?!=)')
-        for bstart, bend in brace_ranges:
+        reTkey = re.compile(r'\b([A-Za-z_]\w*)\s*=(?!=)')
+        for bstart, bend in braceRanges:
             region = text[bstart:bend + 1]
-            for m in re_tkey.finditer(region):
-                abs_start = bstart + m.start(1)
-                abs_end = bstart + m.end(1)
-                key_positions.add((abs_start, abs_end))
+            for m in reTkey.finditer(region):
+                absStart = bstart + m.start(1)
+                absEnd = bstart + m.end(1)
+                keyPositions.add((absStart, absEnd))
 
-        return key_positions
+        return keyPositions
 
     def analyze(self):
         doc = self.document()
-        if self._last_revision == doc.revision():
+        if self._lastRevision == doc.revision():
             return
-        self._last_revision = doc.revision()
+        self._lastRevision = doc.revision()
         self.analyzeText(doc.toPlainText())
 
     def analyzeText(self, text):
         stripped = list(text)
-        for rx in (self._re_block_comment, self._re_line_comment, self._re_dstring, self._re_sstring):
+        for rx in (self._reBlockComment, self._reLineComment, self._reDstring, self._reSstring):
             for m in rx.finditer(text):
                 for i in range(m.start(), m.end()):
                     if stripped[i] != '\n':
                         stripped[i] = ' '
-        stripped_text = ''.join(stripped)
+        strippedText = ''.join(stripped)
 
-        table_key_positions = self._find_table_key_positions(stripped_text)
+        tableKeyPositions = self._findTableKeyPositions(strippedText)
 
-        func_call_positions = set()
-        for m in self._re_func_call.finditer(stripped_text):
-            func_call_positions.add((m.start(1), m.end(1)))
+        funcCallPositions = set()
+        for m in self._reFuncCall.finditer(strippedText):
+            funcCallPositions.add((m.start(1), m.end(1)))
 
         declared = set()
-        declared_positions = {}
+        declaredPositions = {}
 
-        def add_names(group_text, base_offset):
+        def addNames(groupText, baseOffset):
             offset = 0
-            for name in group_text.split(','):
-                raw_name = name
+            for name in groupText.split(','):
+                rawName = name
                 name = name.strip()
                 if name and name != '...' and re.match(r'^[A-Za-z_]\w*$', name):
                     declared.add(name)
-                    name_pos = group_text.find(name, offset)
-                    if name_pos >= 0:
-                        abs_pos = base_offset + name_pos
-                        if name not in declared_positions:
-                            declared_positions[name] = []
-                        declared_positions[name].append(abs_pos)
-                offset += len(raw_name) + 1  # +1 for comma
+                    namePos = groupText.find(name, offset)
+                    if namePos >= 0:
+                        absPos = baseOffset + namePos
+                        if name not in declaredPositions:
+                            declaredPositions[name] = []
+                        declaredPositions[name].append(absPos)
+                offset += len(rawName) + 1  # +1 for comma
 
-        for m in self._re_local_func.finditer(stripped_text):
+        for m in self._reLocalFunc.finditer(strippedText):
             name = m.group(1)
             declared.add(name)
-            if name not in declared_positions:
-                declared_positions[name] = []
-            declared_positions[name].append(m.start(1))
+            if name not in declaredPositions:
+                declaredPositions[name] = []
+            declaredPositions[name].append(m.start(1))
 
-        for m in self._re_local_vars.finditer(stripped_text):
-            add_names(m.group(1), m.start(1))
+        for m in self._reLocalVars.finditer(strippedText):
+            addNames(m.group(1), m.start(1))
 
-        for m in self._re_func_params.finditer(stripped_text):
-            add_names(m.group(1), m.start(1))
+        for m in self._reFuncParams.finditer(strippedText):
+            addNames(m.group(1), m.start(1))
 
-        for m in self._re_for_in.finditer(stripped_text):
-            add_names(m.group(1), m.start(1))
+        for m in self._reForIn.finditer(strippedText):
+            addNames(m.group(1), m.start(1))
 
-        for m in self._re_for_num.finditer(stripped_text):
+        for m in self._reForNum.finditer(strippedText):
             name = m.group(1)
             declared.add(name)
-            if name not in declared_positions:
-                declared_positions[name] = []
-            declared_positions[name].append(m.start(1))
+            if name not in declaredPositions:
+                declaredPositions[name] = []
+            declaredPositions[name].append(m.start(1))
 
-        for m in self._re_assign_target.finditer(stripped_text):
+        for m in self._reAssignTarget.finditer(strippedText):
             declared.add(m.group(1))
 
-        for m in self._re_global_func.finditer(stripped_text):
+        for m in self._reGlobalFunc.finditer(strippedText):
             declared.add(m.group(1))
 
-        known = self._known_builtins | declared
+        known = self._knownBuiltins | declared
 
-        undefined_ranges = []
-        used_names = set()
+        undefinedRanges = []
+        usedNames = set()
 
-        for m in self._re_identifier.finditer(stripped_text):
+        for m in self._reIdentifier.finditer(strippedText):
             name = m.group()
             start = m.start()
             end = m.end()
 
-            prev_char = stripped_text[start - 1] if start > 0 else ''
-            if prev_char in ('.', ':'):
+            prevChar = strippedText[start - 1] if start > 0 else ''
+            if prevChar in ('.', ':'):
                 continue
 
-            if (start, end) in table_key_positions:
+            if (start, end) in tableKeyPositions:
                 continue
 
             if name in known:
-                if name in declared_positions:
-                    if start not in declared_positions[name]:
-                        used_names.add(name)
+                if name in declaredPositions:
+                    if start not in declaredPositions[name]:
+                        usedNames.add(name)
                 continue
 
-            if (start, end) in func_call_positions:
+            if (start, end) in funcCallPositions:
                 continue
 
-            undefined_ranges.append((start, len(name)))
+            undefinedRanges.append((start, len(name)))
 
-        self.undefined_ranges = undefined_ranges
+        self.undefinedRanges = undefinedRanges
 
-        unused_ranges = []
-        for name, positions in declared_positions.items():
-            if name in used_names:
+        unusedRanges = []
+        for name, positions in declaredPositions.items():
+            if name in usedNames:
                 continue
             if name.startswith('_'):
                 continue
-            if name in self._known_builtins:
+            if name in self._knownBuiltins:
                 continue
             for pos in positions:
-                unused_ranges.append((pos, len(name)))
+                unusedRanges.append((pos, len(name)))
 
-        self.unused_ranges = unused_ranges
+        self.unusedRanges = unusedRanges
 
     def highlightBlock(self, text):
         limit = self.progressiveLimit
@@ -334,58 +334,58 @@ class LuauHighlighter(QSyntaxHighlighter):
                 return
 
         for pattern, fmt in self.rules:
-            match_iterator = pattern.globalMatch(text)
-            while match_iterator.hasNext():
-                match = match_iterator.next()
+            matchIterator = pattern.globalMatch(text)
+            while matchIterator.hasNext():
+                match = matchIterator.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
         # block comments
         self.setCurrentBlockState(0)
 
         if self.previousBlockState() != 1:
-            match = self.block_comment_start.match(text)
-            start_index = match.capturedStart() if match.hasMatch() else -1
+            match = self.blockCommentStart.match(text)
+            startIndex = match.capturedStart() if match.hasMatch() else -1
         else:
-            start_index = 0
+            startIndex = 0
 
-        while start_index >= 0:
-            end_match = self.block_comment_end.match(text, start_index)
-            if end_match.hasMatch():
-                end_index = end_match.capturedStart()
-                comment_length = end_index - start_index + end_match.capturedLength()
-                self.setFormat(start_index, comment_length, self.comment_format)
-                next_match = self.block_comment_start.match(text, start_index + comment_length)
-                start_index = next_match.capturedStart() if next_match.hasMatch() else -1
+        while startIndex >= 0:
+            endMatch = self.blockCommentEnd.match(text, startIndex)
+            if endMatch.hasMatch():
+                endIndex = endMatch.capturedStart()
+                commentLength = endIndex - startIndex + endMatch.capturedLength()
+                self.setFormat(startIndex, commentLength, self.commentFormat)
+                nextMatch = self.blockCommentStart.match(text, startIndex + commentLength)
+                startIndex = nextMatch.capturedStart() if nextMatch.hasMatch() else -1
             else:
                 self.setCurrentBlockState(1)
-                comment_length = len(text) - start_index
-                self.setFormat(start_index, comment_length, self.comment_format)
+                commentLength = len(text) - startIndex
+                self.setFormat(startIndex, commentLength, self.commentFormat)
                 break
 
-        block_start = self.currentBlock().position()
-        block_end = block_start + len(text)
+        blockStart = self.currentBlock().position()
+        blockEnd = blockStart + len(text)
 
-        for start, length in self.undefined_ranges:
-            if start >= block_end or start + length <= block_start:
+        for start, length in self.undefinedRanges:
+            if start >= blockEnd or start + length <= blockStart:
                 continue
-            rel_start = max(start, block_start) - block_start
-            rel_end = min(start + length, block_end) - block_start
-            if rel_end > rel_start:
-                fmt = self.format(rel_start)
+            relStart = max(start, blockStart) - blockStart
+            relEnd = min(start + length, blockEnd) - blockStart
+            if relEnd > relStart:
+                fmt = self.format(relStart)
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
                 fmt.setUnderlineColor(QColor("#ff5561"))
-                self.setFormat(rel_start, rel_end - rel_start, fmt)
+                self.setFormat(relStart, relEnd - relStart, fmt)
 
-        for start, length in self.unused_ranges:
-            if start >= block_end or start + length <= block_start:
+        for start, length in self.unusedRanges:
+            if start >= blockEnd or start + length <= blockStart:
                 continue
-            rel_start = max(start, block_start) - block_start
-            rel_end = min(start + length, block_end) - block_start
-            if rel_end > rel_start:
-                fmt = self.format(rel_start)
+            relStart = max(start, blockStart) - blockStart
+            relEnd = min(start + length, blockEnd) - blockStart
+            if relEnd > relStart:
+                fmt = self.format(relStart)
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
                 fmt.setUnderlineColor(QColor("#d6cc61"))
-                self.setFormat(rel_start, rel_end - rel_start, fmt)
+                self.setFormat(relStart, relEnd - relStart, fmt)
 
 class LineNumberArea(QWidget):
     def __init__(self, editor):
@@ -399,9 +399,9 @@ class LineNumberArea(QWidget):
         self.editor.lineNumberAreaPaintEvent(event)
 
 class CodeEditor(QPlainTextEdit):
-    SYNC_BLOCK_LIMIT = 200
-    SYNC_CHAR_LIMIT = 10000
-    PROGRESSIVE_CHUNK = 40
+    syncBlockLimit = 200
+    syncCharLimit = 10000
+    progressiveChunk = 40
 
     def __init__(self, content=None):
         super().__init__()
@@ -441,7 +441,7 @@ class CodeEditor(QPlainTextEdit):
 
     def _isLarge(self):
         doc = self.document()
-        return doc.blockCount() > self.SYNC_BLOCK_LIMIT or doc.characterCount() > self.SYNC_CHAR_LIMIT
+        return doc.blockCount() > self.syncBlockLimit or doc.characterCount() > self.syncCharLimit
 
     def attachHighlighter(self):
         if self.highlighter is not None:
@@ -454,8 +454,8 @@ class CodeEditor(QPlainTextEdit):
             return
 
         self.highlighter.progressiveLimit = 0
-        self.highlighter.undefined_ranges = []
-        self.highlighter.unused_ranges = []
+        self.highlighter.undefinedRanges = []
+        self.highlighter.unusedRanges = []
         self._startProgressive()
 
     def _startProgressive(self):
@@ -480,7 +480,7 @@ class CodeEditor(QPlainTextEdit):
             self._progressiveTimer.stop()
             return
 
-        end = min(start + self.PROGRESSIVE_CHUNK, total)
+        end = min(start + self.progressiveChunk, total)
         hl.progressiveLimit = end
 
         block = doc.findBlockByNumber(start)
