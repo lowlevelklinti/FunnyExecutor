@@ -1,4 +1,3 @@
--- // Credits to theholytorch for giving the idea to rename the VM and shorten VM errors
 local funnyexecutor = (function()
 -- // Environment changes in the VM are not supposed to alter the behaviour of the VM so we localise globals beforehand
 local type = type
@@ -1656,14 +1655,14 @@ task.spawn(function()
 				local ran, err = pcall(func)
 
 				if not ran then
-					warn("Funny Executor bootstrap: init.luau error: " .. tostring(err))
+					warn("Funny VM: init.luau error: " .. tostring(err))
 				end
 
 				break
 			elseif ok then
-				warn("Funny Executor bootstrap: init.luau failed to load (bridge/bytecode mismatch?)")
+				warn("Funny VM: init.luau failed to load smh?")
 			else
-				warn("Funny Executor bootstrap: " .. tostring(func))
+				warn("Funny VM: " .. tostring(func))
 			end
 		end
 

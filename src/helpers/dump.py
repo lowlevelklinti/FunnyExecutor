@@ -1,6 +1,6 @@
 import FAPI
 scripts = {
-    'init': ['Workspace', 'BinSource']
+    'init': ['Workspace', 'FunnyVM']
 
 }
 sdk = FAPI.getSdk()

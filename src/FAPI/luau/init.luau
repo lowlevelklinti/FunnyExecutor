@@ -1315,7 +1315,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.552'
+	return 'FunnyExecutor', 'v0.553'
 end
 
 getexecutorname = function()
@@ -2136,7 +2136,7 @@ isreadonly = function(tbl)
 	return table.isfrozen(tbl)
 end
 
--- cache (service refs swap through the bootstrap GetService cache)
+-- cache
 
 local invalidated = setmetatable({}, {__mode = 'k'})
 
