@@ -334,11 +334,19 @@ inputHandlers = {
     'mousescroll': lambda a: pydirectinput.scroll(int(a[0])),
 }
 
+_seenBytecodeVersions = set()
+
 def decodeBytecode(bytecode: bytes) -> bytes:
     try:
-        return Luau.decryptBytecode(bytecode)
-    except BytecodeError:
+        raw = Luau.decryptBytecode(bytecode)
+    except BytecodeError as e:
+        print(f'decodeBytecode: {e} (first8={bytecode[:8].hex()})')
         return bytecode
+    version = raw[0] if raw else 0
+    if version not in _seenBytecodeVersions:
+        _seenBytecodeVersions.add(version)
+        print(f'luau bytecode version: {version}')
+    return raw
 
 def recvMethod(method, args):
     createWorkspace()
@@ -599,7 +607,7 @@ def recvMethod(method, args):
     elif method == 'websocket_send':
         try:
             wsId = int(args[0])
-            data = base64.b64decode(args[1]).decode('utf-8', 'replace')
+            data = base64.b64decode(args[1])
         except Exception:
             return b'fail'
         entry = _wsPool.get(wsId)
@@ -611,7 +619,7 @@ def recvMethod(method, args):
         if entry['status'] != 'open' or not entry['socket']:
             return b'fail'
         try:
-            entry['socket'].send(data)
+            _wsSendData(entry['socket'], data)
         except Exception:
             return b'fail'
         return b'ok'
@@ -633,9 +641,10 @@ def recvMethod(method, args):
             if kind == 'open':
                 events.append({'t': 'open'})
             elif kind == 'message':
+                raw = data if isinstance(data, (bytes, bytearray)) else str(data).encode('utf-8', 'replace')
                 events.append({
                     't': 'message',
-                    'd': base64.b64encode(data.encode('utf-8', 'replace')).decode('ascii'),
+                    'd': base64.b64encode(bytes(raw)).decode('ascii'),
                 })
             elif kind == 'close':
                 events.append({'t': 'close', 'c': data[0], 'r': data[1]})
@@ -799,6 +808,17 @@ def _wsCloseInfo(socket, payload=None):
     reason = getattr(socket, 'close_reason', '') or ''
     return (status or 1006), reason
 
+def _wsSendData(socket, data):
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    try:
+        text = data.decode('utf-8')
+    except UnicodeDecodeError:
+        socket.send_binary(data)
+        return
+    socket.send(text)
+
+
 def _wsWorker(wsId, url):
     entry = _wsPool.get(wsId)
     if entry is None:
@@ -815,7 +835,7 @@ def _wsWorker(wsId, url):
     entry['status'] = 'open'
     for msg in entry['pending']:
         try:
-            socket.send(msg)
+            _wsSendData(socket, msg)
         except Exception:
             pass
     entry['pending'].clear()
@@ -836,18 +856,9 @@ def _wsWorker(wsId, url):
             entry['events'].put(('close', (1006, str(e))))
             break
 
-        if opcode == 0x1:  # text
-            try:
-                text = frame.decode('utf-8', 'replace') if isinstance(frame, bytes) else str(frame)
-            except Exception:
-                text = ''
-            entry['events'].put(('message', text))
-        elif opcode == 0x2:  # binary
-            try:
-                text = frame.decode('utf-8', 'replace') if isinstance(frame, bytes) else str(frame)
-            except Exception:
-                text = ''
-            entry['events'].put(('message', text))
+        if opcode in (0x1, 0x2):  # text or binary
+            raw = frame if isinstance(frame, (bytes, bytearray)) else str(frame).encode('utf-8', 'replace')
+            entry['events'].put(('message', bytes(raw)))
         elif opcode == 0x8:  # close
             entry['status'] = 'closed'
             code, reason = _wsCloseInfo(socket, frame)

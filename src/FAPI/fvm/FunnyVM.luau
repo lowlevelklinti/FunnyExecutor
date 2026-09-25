@@ -667,7 +667,10 @@ local function luau_deserialize(bytecode, luau_settings)
 	}
 end
 
-local function luau_load(module, env, luau_settings)
+local gc_registry = setmetatable({}, {__mode = "k"})
+local closure_info = setmetatable({}, {__mode = "k"})
+
+local function luau_load(module, env, luau_settings, isExecutorModule)
 	if luau_settings == nil then
 		luau_settings = luau_newsettings()
 	else 
@@ -677,6 +680,9 @@ local function luau_load(module, env, luau_settings)
 	if type(module) ~= "table" then
 		module = luau_deserialize(module, luau_settings)
 	end
+
+	local executorModule = isExecutorModule == true
+	module.executor = executorModule
 
 	local protolist = module.protoList
 	local mainProto = module.mainProto
@@ -879,7 +885,10 @@ local function luau_load(module, env, luau_settings)
 
 					local nups = newPrototype.nups
 					local upvalues = table_create(nups)
-					stack[code_A[ipc]] = luau_wrapclosure(module, newPrototype, upvalues)
+					local closureObject = luau_wrapclosure(module, newPrototype, upvalues)
+					stack[code_A[ipc]] = closureObject
+					gc_registry[closureObject] = executorModule
+					closure_info[closureObject] = { proto = newPrototype, upvalues = upvalues, env = env, module = module, wrap = luau_wrapclosure }
 
 					for i = 1, nups do
 						local cap_A = code_A[pc]
@@ -1161,7 +1170,9 @@ local function luau_load(module, env, luau_settings)
 				elseif op == 52 then --[[ LENGTH ]]
 					stack[code_A[ipc]] = #stack[code_B[ipc]]
 				elseif op == 53 then --[[ NEWTABLE ]]
-					stack[code_A[ipc]] = table_create(code_aux[ipc])
+					local newTable = table_create(code_aux[ipc])
+					stack[code_A[ipc]] = newTable
+					gc_registry[newTable] = executorModule
 
 					pc += 1 --// adjust for aux 
 				elseif op == 54 then --[[ DUPTABLE ]]
@@ -1171,6 +1182,7 @@ local function luau_load(module, env, luau_settings)
 						serialized[constants[id + 1]] = nil
 					end
 					stack[code_A[ipc]] = serialized
+					gc_registry[serialized] = executorModule
 				elseif op == 55 then --[[ SETLIST ]]
 					local A = code_A[ipc]
 					local B = code_B[ipc]
@@ -1319,7 +1331,10 @@ local function luau_load(module, env, luau_settings)
 
 					local nups = newPrototype.nups
 					local upvalues = table_create(nups)
-					stack[code_A[ipc]] = luau_wrapclosure(module, newPrototype, upvalues)
+					local closureObject = luau_wrapclosure(module, newPrototype, upvalues)
+					stack[code_A[ipc]] = closureObject
+					gc_registry[closureObject] = executorModule
+					closure_info[closureObject] = { proto = newPrototype, upvalues = upvalues, env = env, module = module, wrap = luau_wrapclosure }
 
 					for i = 1, nups do
 						local cap_A = code_A[pc]
@@ -1517,7 +1532,12 @@ local function luau_load(module, env, luau_settings)
 		end 
 	end
 
-	return luau_wrapclosure(module, mainProto),  luau_close
+	local mainClosure = luau_wrapclosure(module, mainProto)
+
+	gc_registry[mainClosure] = executorModule
+	closure_info[mainClosure] = { proto = mainProto, upvalues = nil, env = env, module = module, wrap = luau_wrapclosure }
+
+	return mainClosure, luau_close
 end
 
 return {
@@ -1526,6 +1546,8 @@ return {
 	luau_deserialize = luau_deserialize,
 	luau_load = luau_load,
 	luau_getcoverage = luau_getcoverage,
+	gcRegistry = gc_registry,
+	closureInfo = closure_info,
 }
 
 end)()
@@ -1567,6 +1589,9 @@ local namecall_registry = setmetatable({}, {__mode = "k"})
 
 local service_cache = {}
 __funny_service_cache = service_cache
+
+__funny_gc_registry = funnyexecutor.gcRegistry
+__funny_closure_info = funnyexecutor.closureInfo
 
 local function http_get(url)
 	local result = nil
@@ -1635,13 +1660,13 @@ getnamecallmethod = function()
 	return namecall_registry[coroutine.running()]
 end
 
-load_bytecode = function(bytecode, env)
+load_bytecode = function(bytecode, env, isExecutorModule)
 	local settings = funnyexecutor.luau_newsettings()
 	settings.vectorCtor = Vector3.new
 	settings.useNativeNamecall = true
 	settings.namecallHandler = namecall_handler
 
-	return (funnyexecutor.luau_load(bytecode, env or getfenv(), settings))
+	return (funnyexecutor.luau_load(bytecode, env or getfenv(), settings, isExecutorModule))
 end
 
 task.spawn(function()
@@ -1649,7 +1674,7 @@ task.spawn(function()
 		local bytecode = bridge_request("getinitraw")
 
 		if bytecode then
-			local ok, func = pcall(load_bytecode, bytecode, getfenv())
+			local ok, func = pcall(load_bytecode, bytecode, getfenv(), true)
 
 			if ok and func then
 				local ran, err = pcall(func)

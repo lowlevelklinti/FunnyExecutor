@@ -364,8 +364,8 @@ end
 
 local genv_table = {}
 
-getgenv = function(layer)
-	return getfenv(layer)
+getgenv = function()
+	return genv_table
 end
 
 do
@@ -383,7 +383,6 @@ end
 local renv_table = {
 	game = game,
 	workspace = workspace,
-	script = script,
 	Instance = Instance,
 	Enum = Enum,
 	task = task,
@@ -417,7 +416,6 @@ local renv_table = {
 getrenv = function()
 	return renv_table
 end
-
 
 local AES = {}
 do
@@ -674,99 +672,6 @@ for i = 1, #b64_alphabet do
 	b64_lookup[string.byte(b64_alphabet, i)] = i - 1
 end
 
--- imvast
-local ssbs = {}
-local hiddenProperties = {}
-
-function isscriptable(object, property)
-    if object and typeof(object) == 'Instance' then
-        local s, r = pcall(function()
-            return ssbs[object][property]
-        end)
-        if s and r ~= nil then
-            return r
-        end
-        local s, r = pcall(function()
-            return object[property] ~= nil
-        end)
-        return s and r
-    end
-    return false
-end
-
-getcallingscript = function()
- local s = debug.info(1, 's')
- for i, v in next, game:GetDescendants() do
-  if v:GetFullName() == s then return v end
- end
- return nil
-end
-
-clonefunction = function(func)
-    assert(type(func) == "function", "function expected")
-
-    return function(...)
-        return func(...)
-    end
-end
-
--- not work
-function setscriptable(object, property, bool)
-    if object and typeof(object) == 'Instance' and property then
-        local scriptable = isscriptable(object, property)
-        local s = pcall(function()
-            ssbs[object][property] = bool
-        end)
-        if not s then
-            ssbs[object] = {[property] = bool}
-        end
-        return scriptable
-    end
-end 
-
-function gethiddenproperty(instance, property)
-    assert(typeof(instance) == "Instance", "invalid argument #1 to 'gethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2)
-    assert(type(property) == "string", "invalid argument #2 to 'gethiddenproperty' (string expected, got " .. type(property) .. ") ", 2)
-    
-    local success, value = pcall(function()
-        return instance[property]
-    end)
-    
-    if success then
-        return value, false
-    end
-    
-    if property == "size_xml" and instance:IsA("Fire") then
-        return hiddenProperties[instance] and hiddenProperties[instance][property] or 5, true
-    end
-    
-    error("Unable to get hidden property '" .. property .. "' from " .. instance.ClassName, 2)
-end 
-
-function sethiddenproperty(instance, property, value)
-    assert(typeof(instance) == "Instance", "invalid argument #1 to 'sethiddenproperty' (Instance expected, got " .. typeof(instance) .. ") ", 2) 
-    assert(type(property) == "string", "invalid argument #2 to 'sethiddenproperty' (string expected, got " .. type(property) .. ") ", 2)
-    
-    if property == "size_xml" and instance:IsA("Fire") then
-        if not hiddenProperties[instance] then
-            hiddenProperties[instance] = {}
-        end
-        hiddenProperties[instance][property] = value
-        return true
-    end
-    
-    local success = pcall(function()
-        instance[property] = value
-    end)
-    
-    if success then
-        return false
-    end
-    
-    error("Unable to set hidden property '" .. property .. "' on " .. instance.ClassName, 2)
-end 
---
-
 function base64encode(data)
 	local len = #data
 	if len == 0 then
@@ -993,9 +898,16 @@ crypt.lz4compress = lz4.compress
 crypt.lz4decompress = lz4.decompress
 
 local chunk_sources = setmetatable({}, {__mode = 'k'})
+local cClosureMarkers = setmetatable({}, {__mode = 'k'})
 
 local real_debug = debug
 local real_debug_info = real_debug.info
+
+local protoMarker = {__funnyproto = true}
+
+local function isFunnyProto(value)
+	return type(value) == 'table' and getmetatable(value) == protoMarker
+end
 
 debug = setmetatable({}, {__index = real_debug})
 
@@ -1005,6 +917,58 @@ debug.info = function(f, what)
 	if type(f) == 'number' then
 		local okn, func = pcall(real_debug_info, f + 1, 'f')
 		target = okn and func or nil
+	end
+
+	if isFunnyProto(target) then
+		local vals = {}
+		local count = 0
+		local options = type(what) == 'string' and what or ''
+		for i = 1, #options do
+			local opt = options:sub(i, i)
+			if opt == 'n' then
+				count += 1
+				vals[count] = target.debugname or '(??)'
+			elseif opt == 'a' then
+				count += 2
+				vals[count - 1] = target.numparams or 0
+				vals[count] = target.isvararg == true
+			elseif opt == 'l' then
+				count += 1
+				vals[count] = target.linedefined or -1
+			elseif opt == 's' then
+				count += 1
+				vals[count] = '=(FunnyVM)'
+			else
+				count += 1
+			end
+		end
+		return table.unpack(vals, 1, count)
+	end
+
+	if type(target) == 'function' and cClosureMarkers[target] then
+		local vals = {}
+		local count = 0
+		local options = type(what) == 'string' and what or ''
+		for i = 1, #options do
+			local opt = options:sub(i, i)
+			if opt == 'n' then
+				count += 1
+				vals[count] = ''
+			elseif opt == 'a' then
+				count += 2
+				vals[count - 1] = -1
+				vals[count] = true
+			elseif opt == 'l' then
+				count += 1
+				vals[count] = -1
+			elseif opt == 's' then
+				count += 1
+				vals[count] = '[C]'
+			else
+				count += 1
+			end
+		end
+		return table.unpack(vals, 1, count)
 	end
 
 	local name = type(target) == 'function' and chunk_sources[target]
@@ -1315,7 +1279,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'FunnyExecutor', 'v0.553'
+	return 'Funny Executor', 'v0.554'
 end
 
 getexecutorname = function()
@@ -1328,11 +1292,20 @@ end
 
 -- executor env extensions
 
-local executor_closures = {}
-setmetatable(executor_closures, {__mode = 'k'})
+newcclosure = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'newcclosure' (function expected, got " .. type(func) .. ')', 2)
+	local wrapper = function(...)
+		return func(...)
+	end
+	cClosureMarkers[wrapper] = true
+	return wrapper
+end
 
 islclosure = function(func)
 	assert(type(func) == 'function', "invalid argument #1 to 'islclosure' (function expected, got " .. type(func) .. ')', 2)
+	if cClosureMarkers[func] then
+		return false
+	end
 	return debug.info(func, 's') ~= '[C]'
 end
 
@@ -1340,65 +1313,16 @@ isluaclosure = islclosure
 
 iscclosure = function(func)
 	assert(type(func) == 'function', "invalid argument #1 to 'iscclosure' (function expected, got " .. type(func) .. ')', 2)
+	if cClosureMarkers[func] then
+		return true
+	end
 	return debug.info(func, 's') == '[C]'
 end
-
-newcclosure = function(func)
-	assert(type(func) == 'function', "invalid argument #1 to 'newcclosure' (function expected, got " .. type(func) .. ')', 2)
-	local wrapped = coroutine.wrap(function(...)
-		while true do
-			coroutine.yield(func(...))
-		end
-	end)
-	executor_closures[wrapped] = true
-	return wrapped
-end
-
-
-isexecutorclosure = function(func)
-	if type(func) ~= 'function' then
-		error("invalid argument #1 to 'isexecutorclosure' (function expected, got " .. type(func) .. ')', 2)
-	end
-
-	if executor_closures[func] then
-		return true
-	end
-
-	if iscclosure(func) then
-		return debug.info(func, 'n') == ''
-	end
-
-	local ok, fenv = pcall(getfenv, func)
-	if not ok then
-		return false
-	end
-
-	if typeof(fenv.script) ~= 'Instance' then
-		return true
-	end
-
-	if fenv.script.Name == 'AvatarEditorPrompts' or fenv.script.Name == 'JestGlobals' then
-		return false
-	end
-
-	if fenv.script.Parent == nil then
-		return true
-	end
-
-	if fenv == getfenv(0) then
-		return true
-	end
-
-	return true
-end
-
-checkclosure = isexecutorclosure
-isourclosure = isexecutorclosure
 
 -- cloneref / compareinstances
 
 local clonerefs = {}
-setmetatable(clonerefs, {__mode = 'k'})
+setmetatable(clonerefs, {__mode = 'kv'})
 
 local function clone_target(proxy)
 	local obj = clonerefs[proxy]
@@ -1993,6 +1917,366 @@ getinstances = function()
 	return all_known_instances()
 end
 
+getreg = function()
+	local result = {}
+	local seen = {}
+
+	local function add(value)
+		if value == nil or seen[value] then
+			return
+		end
+		seen[value] = true
+		result[#result + 1] = value
+	end
+
+	for _, inst in ipairs(registry_entries()) do
+		local ok, kind = pcall(typeof, inst)
+		if ok and kind == 'Instance' then
+			add(inst)
+		end
+	end
+
+	for _, value in pairs(getfenv()) do
+		local kind = type(value)
+		if kind == 'function' or kind == 'table' or kind == 'userdata' or kind == 'thread' then
+			add(value)
+		end
+	end
+
+	add(game)
+	add(workspace)
+
+	return result
+end
+
+local function vm_registry(name)
+	local value = rawget(getfenv(), name)
+	if type(value) == 'table' then
+		return value
+	end
+	return nil
+end
+
+local function closure_upvalues(entry)
+	local result = {}
+	local upvalues = entry.upvalues
+	if type(upvalues) ~= 'table' then
+		return result
+	end
+	for _, upvalue in ipairs(upvalues) do
+		if type(upvalue) == 'table' and type(upvalue.store) == 'table' then
+			local ok, value = pcall(function()
+				return upvalue.store[upvalue.index]
+			end)
+			if ok and value ~= nil then
+				result[#result + 1] = value
+			end
+		end
+	end
+	return result
+end
+
+local function filter_function(func, options)
+	local info = vm_registry('__funny_closure_info')
+	if type(info) ~= 'table' then
+		return false
+	end
+
+	local entry = info[func]
+	if type(entry) ~= 'table' then
+		return false
+	end
+
+	local wantedConstants = options.Constants
+	if type(wantedConstants) == 'table' then
+		local proto = entry.proto
+		local constants = type(proto) == 'table' and proto.k or nil
+		if type(constants) ~= 'table' then
+			return false
+		end
+		local present = {}
+		for _, constant in ipairs(constants) do
+			present[constant] = true
+		end
+		for _, wanted in ipairs(wantedConstants) do
+			if not present[wanted] then
+				return false
+			end
+		end
+	end
+
+	local wantedUpvalues = options.Upvalues
+	if type(wantedUpvalues) == 'table' then
+		local present = {}
+		for _, value in ipairs(closure_upvalues(entry)) do
+			present[value] = true
+		end
+		for _, wanted in ipairs(wantedUpvalues) do
+			if not present[wanted] then
+				return false
+			end
+		end
+	end
+
+	return true
+end
+
+local function filter_table(tbl, options)
+	local keyValuePairs = options.KeyValuePairs
+	if type(keyValuePairs) == 'table' then
+		for key, value in pairs(keyValuePairs) do
+			if rawget(tbl, key) ~= value then
+				return false
+			end
+		end
+	end
+
+	local keys = options.Keys
+	if type(keys) == 'table' then
+		for _, key in ipairs(keys) do
+			if rawget(tbl, key) == nil then
+				return false
+			end
+		end
+	end
+
+	local values = options.Values
+	if type(values) == 'table' then
+		local present = {}
+		for _, value in pairs(tbl) do
+			present[value] = true
+		end
+		for _, wanted in ipairs(values) do
+			if not present[wanted] then
+				return false
+			end
+		end
+	end
+
+	if options.Metatable ~= nil then
+		local ok, meta = pcall(getmetatable, tbl)
+		if not ok or meta ~= options.Metatable then
+			return false
+		end
+	end
+
+	return true
+end
+
+getgc = function(includeTables)
+	local result = {}
+	local registry = vm_registry('__funny_gc_registry')
+	if type(registry) ~= 'table' then
+		return result
+	end
+
+	for object in pairs(registry) do
+		local kind = type(object)
+		if kind == 'function' or kind == 'thread' or kind == 'userdata' or (includeTables and kind == 'table') then
+			result[#result + 1] = object
+		end
+	end
+
+	return result
+end
+
+filtergc = function(kind, options, returnOne)
+	local registry = vm_registry('__funny_gc_registry')
+	if type(registry) ~= 'table' then
+		if returnOne then
+			return nil
+		end
+		return {}
+	end
+
+	local wanted = type(kind) == 'string' and string.lower(kind) or 'function'
+	local filterOptions = type(options) == 'table' and options or {}
+	local ignoreExecutor = filterOptions.IgnoreExecutor == true
+	local result = {}
+
+	for object, isExecutor in pairs(registry) do
+		if not (ignoreExecutor and isExecutor == true) then
+			local matched = false
+			if wanted == 'table' then
+				matched = type(object) == 'table' and filter_table(object, filterOptions)
+			elseif wanted == 'function' then
+				matched = type(object) == 'function' and filter_function(object, filterOptions)
+			elseif wanted == 'userdata' then
+				matched = type(object) == 'userdata'
+			elseif wanted == 'thread' then
+				matched = type(object) == 'thread'
+			end
+
+			if matched then
+				if returnOne then
+					return object
+				end
+				result[#result + 1] = object
+			end
+		end
+	end
+
+	if returnOne then
+		return nil
+	end
+
+	return result
+end
+
+local function closure_entry(func)
+	if type(func) ~= 'function' then
+		error("bad argument #1 (function expected, got " .. type(func) .. ')', 3)
+	end
+	local info = vm_registry('__funny_closure_info')
+	local entry = info ~= nil and info[func] or nil
+	if type(entry) ~= 'table' then
+		error("unable to inspect a C closure", 3)
+	end
+	return entry
+end
+
+local function debugGetConstant(func, index)
+	local entry = closure_entry(func)
+	local proto = entry.proto
+	if type(index) ~= 'number' or index < 1 or index > (proto.sizek or 0) then
+		error("invalid constant index", 3)
+	end
+	return proto.k[index]
+end
+
+local function debugGetConstants(func)
+	local entry = closure_entry(func)
+	local proto = entry.proto
+	local result = {}
+	local constants = proto.k
+	if type(constants) == 'table' then
+		for i = 1, proto.sizek or #constants do
+			local value = constants[i]
+			if value ~= nil then
+				result[#result + 1] = value
+			end
+		end
+	end
+	return result
+end
+
+local function debugSetUpvalue(func, index, value)
+	local entry = closure_entry(func)
+	local upvalues = entry.upvalues
+	if type(upvalues) ~= 'table' or type(index) ~= 'number' or index < 1 or index > #upvalues then
+		error("invalid upvalue index", 3)
+	end
+	local upvalue = upvalues[index]
+	upvalue.store[upvalue.index] = value
+	return true
+end
+
+local function debugGetUpvalue(func, index)
+	local entry = closure_entry(func)
+	local upvalues = entry.upvalues
+	if type(upvalues) ~= 'table' or type(index) ~= 'number' or index < 1 or index > #upvalues then
+		error("invalid upvalue index", 3)
+	end
+	local upvalue = upvalues[index]
+	return upvalue.store[upvalue.index]
+end
+
+local function debugGetUpvalues(func)
+	local entry = closure_entry(func)
+	local result = {}
+	local upvalues = entry.upvalues
+	if type(upvalues) == 'table' then
+		for i = 1, #upvalues do
+			local upvalue = upvalues[i]
+			if type(upvalue) == 'table' then
+				result[i] = upvalue.store[upvalue.index]
+			end
+		end
+	end
+	return result
+end
+
+local function debugSetConstant(func, index, value)
+	local entry = closure_entry(func)
+	local proto = entry.proto
+	if type(index) ~= 'number' or index < 1 or index > (proto.sizek or 0) then
+		error("invalid constant index", 3)
+	end
+	proto.k[index] = value
+	return true
+end
+
+local function markProto(proto)
+	if getmetatable(proto) == nil then
+		setmetatable(proto, protoMarker)
+	end
+	return proto
+end
+
+local function debugGetProto(func, index, active)
+	local entry = closure_entry(func)
+	local protos = entry.proto.protos
+	if type(protos) ~= 'table' or type(index) ~= 'number' or index < 1 or index > #protos then
+		error("invalid proto index", 3)
+	end
+	local module = entry.module
+	local wrap = entry.wrap
+	if type(module) ~= 'table' or type(wrap) ~= 'function' then
+		error("debug.getproto requires a FunnyVM rebuild", 3)
+	end
+	local proto = module.protoList[protos[index]]
+	if type(proto) ~= 'table' then
+		error("proto not found", 3)
+	end
+	if active then
+		local upvalues = table.create(proto.nups or 0)
+		return {wrap(module, proto, upvalues)}
+	end
+	return markProto(proto)
+end
+
+local function debugGetProtos(func)
+	local entry = closure_entry(func)
+	local result = {}
+	local protos = entry.proto.protos
+	local module = entry.module
+	if type(protos) == 'table' and type(module) == 'table' then
+		for i = 1, #protos do
+			local proto = module.protoList[protos[i]]
+			if type(proto) == 'table' then
+				result[#result + 1] = markProto(proto)
+			end
+		end
+	end
+	return result
+end
+
+debug.getconstant = debugGetConstant
+debug.getconstants = debugGetConstants
+debug.setupvalue = debugSetUpvalue
+debug.getupvalue = debugGetUpvalue
+debug.getupvalues = debugGetUpvalues
+debug.setconstant = debugSetConstant
+debug.getproto = debugGetProto
+debug.getprotos = debugGetProtos
+debug.getstack = function(level, index)
+	return nil
+end
+debug.setstack = function(level, index, value)
+	error("debug.setstack is not supported by FunnyExecutor", 2)
+end
+
+getconstant = debugGetConstant
+getconstants = debugGetConstants
+setupvalue = debugSetUpvalue
+getupvalue = debugGetUpvalue
+getupvalues = debugGetUpvalues
+setconstant = debugSetConstant
+getproto = debugGetProto
+getprotos = debugGetProtos
+getstack = debug.getstack
+setstack = debug.setstack
+
 getnilinstances = function()
 	local result = {}
 	for _, inst in ipairs(registry_entries()) do
@@ -2059,7 +2343,35 @@ getrunningscripts = function()
 			if oke and enabled == false then
 				return false
 			end
-			return inst:FindFirstAncestorOfClass('Actor') == nil
+			if inst:FindFirstAncestorOfClass('Actor') ~= nil then
+				return false
+			end
+			local okm, isModule = pcall(function()
+				return inst:IsA('ModuleScript')
+			end)
+			if okm and isModule then
+				return false
+			end
+			local okl, isLocal = pcall(function()
+				return inst:IsA('LocalScript')
+			end)
+			if okl and isLocal then
+				local player = game:GetService('Players').LocalPlayer
+				if player ~= nil then
+					if inst:IsDescendantOf(player) then
+						return true
+					end
+					local okc, character = pcall(function()
+						return player.Character
+					end)
+					if okc and character ~= nil and inst:IsDescendantOf(character) then
+						return true
+					end
+				end
+				local rf = game:GetService('ReplicatedFirst')
+				return inst:IsDescendantOf(rf)
+			end
+			return true
 		end)
 		if ok and running then
 			result[#result + 1] = inst
@@ -2070,8 +2382,12 @@ end
 
 local loaded_modules = setmetatable({}, {__mode = 'k'})
 
+local script_envs = setmetatable({}, {__mode = 'k'})
+
 local function module_env(mod)
-	return setmetatable({script = mod, require = require}, {__index = getfenv()})
+	local env = setmetatable({script = mod, require = require}, {__index = getfenv()})
+	script_envs[mod] = env
+	return env
 end
 
 require = function(mod)
@@ -2106,28 +2422,18 @@ getloadedmodules = function()
 	return result
 end
 
-getscriptclosure = function(script_inst)
-	assert(typeof(script_inst) == 'Instance' and script_inst:IsA('LuaSourceContainer'), "invalid argument #1 to 'getscriptclosure' (LuaSourceContainer expected, got " .. typeof(script_inst) .. ')', 2)
-	local bytecode = getscriptbytecode(script_inst)
-	if not bytecode or #bytecode == 0 then
+getsenv = function(scr)
+	assert(typeof(scr) == 'Instance' and scr:IsA('LuaSourceContainer'), "invalid argument #1 to 'getsenv' (LuaSourceContainer expected, got " .. typeof(scr) .. ')', 2)
+
+	local ok, enabled = pcall(function()
+		return scr.Enabled
+	end)
+	if ok and enabled == false then
 		return nil
 	end
-	return load_bytecode(bytecode, module_env(script_inst))
+
+	return script_envs[scr]
 end
-
-getscriptfunction = getscriptclosure
-
-getsenv = function(script_inst)
-	assert(typeof(script_inst) == 'Instance' and script_inst:IsA('LuaSourceContainer'), "invalid argument #1 to 'getsenv' (LuaSourceContainer expected, got " .. typeof(script_inst) .. ')', 2)
-	local oke, enabled = pcall(function()
-		return script_inst.Enabled
-	end)
-	if script_inst:IsA('LocalScript') and oke and enabled == false then
-		error('getsenv: script is not running', 2)
-	end
-	return module_env(script_inst)
-end
-
 
 -- isreadonly
 
@@ -2227,34 +2533,18 @@ local function flush_teleport_queue()
 	end
 end
 
-isnetworkowner = function(part: BasePart)
-	if part.Anchored or part:IsGrounded() or not part or not part:IsA("BasePart") then
-		return false
-	end
-	return part.ReceiveAge == 0
-end
-
 -- saveinstance
 local _saveinstance = nil
 saveinstance = function(options) -- docs: https://luau.github.io/UniversalSynSaveInstance/api/SynSaveInstance/
+    if typeof(options) == 'Instance' then
+    	options = {Object = options}
+    end
     options = options or {}
     assert(type(options) == "table", "invalid argument #1 to 'saveinstance' (table expected, got " .. type(options) .. ") ", 2)
     _saveinstance = _saveinstance or loadstring(game:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau", true), "saveinstance")()
     return _saveinstance(options)
 end
 savegame = saveinstance
-
-firetouchinterest = function(part, otherPart, endTouched)
-	assert(typeof(part) == 'Instance', "invalid argument #1 to 'firetouchinterest' (BasePart expected, got " .. typeof(part) .. ')', 2)
-	assert(typeof(otherPart) == 'Instance', "invalid argument #2 to 'firetouchinterest' (BasePart expected, got " .. typeof(otherPart) .. ')', 2)
-	pcall(function()
-		if endTouched then
-			otherPart.CFrame = otherPart.CFrame * CFrame.new(0, -60, 0)
-		else
-			otherPart.CFrame = part.CFrame
-		end
-	end)
-end
 
 getcallbackvalue = function(inst, property)
 	assert(typeof(inst) == 'Instance', "invalid argument #1 to 'getcallbackvalue' (Instance expected, got " .. typeof(inst) .. ')', 2)
@@ -2398,9 +2688,19 @@ function WebSocket.connect(url)
 	local connection = {
 		id = id,
 		closed = false,
+		closeFired = false,
 		OnMessage = Signal.new(),
 		OnClose = Signal.new(),
 	}
+
+	local function fireClose()
+		if connection.closeFired then
+			return
+		end
+		connection.closeFired = true
+		connection.closed = true
+		connection.OnClose:Fire()
+	end
 
 	local proxy = newproxy(true)
 	local meta = getmetatable(proxy)
@@ -2426,6 +2726,7 @@ function WebSocket.connect(url)
 				end
 				connection.closed = true
 				send_method('websocket_close', tostring(connection.id))
+				fireClose()
 			end
 		end
 		error(tostring(key) .. ' is not a valid member of WebSocket', 2)
@@ -2450,10 +2751,9 @@ function WebSocket.connect(url)
 								if okd then
 									connection.OnMessage:Fire(message)
 								end
-							elseif ev.t == 'close' then
-								connection.closed = true
-								connection.OnClose:Fire()
-							end
+						elseif ev.t == 'close' then
+							fireClose()
+						end
 						end
 					end
 				end
@@ -2466,6 +2766,8 @@ function WebSocket.connect(url)
 
 	return proxy
 end
+
+websocket = WebSocket
 
 local function rconsole_bridge(method, text)
 	local response = send_method(method, base64encode(tostring(text)))
@@ -2515,22 +2817,6 @@ openfilesdialog = function(options)
 	return paths:split('\n')
 end
 
-local thread_identities = setmetatable({}, {__mode = 'k'})
-
-getthreadidentity = function()
-	return thread_identities[coroutine.running()] or 2
-end
-
-setthreadidentity = function(identity)
-	assert(type(identity) == 'number', "invalid argument #1 to 'setthreadidentity' (number expected, got " .. type(identity) .. ')', 2)
-	thread_identities[coroutine.running()] = math.floor(identity)
-end
-
-getidentity = getthreadidentity
-getthreadcontext = getthreadidentity
-setidentity = setthreadidentity
-setthreadcontext = setthreadidentity
-
 getactors = function()
 	local result = {}
 	for _, inst in ipairs(all_known_instances()) do
@@ -2542,27 +2828,6 @@ getactors = function()
 		end
 	end
 	return result
-end
-
-isparallel = function()
-	return false
-end
-
-run_on_actor = function(actor, source, ...)
-	assert(typeof(actor) == 'Instance', "invalid argument #1 to 'run_on_actor' (Actor expected, got " .. typeof(actor) .. ')', 2)
-	assert(type(source) == 'string', "invalid argument #2 to 'run_on_actor' (string expected, got " .. type(source) .. ')', 2)
-	local args = table.pack(...)
-	task.spawn(function()
-		local func, err = loadstring(source)
-		if func then
-			local ok, run_err = pcall(func, table.unpack(args, 1, args.n))
-			if not ok then
-				warn('FunnyExecutor -- run_on_actor: ' .. tostring(run_err))
-			end
-		else
-			warn('FunnyExecutor -- run_on_actor: ' .. tostring(err))
-		end
-	end)
 end
 
 local comm_channels = {}
