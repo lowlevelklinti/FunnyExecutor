@@ -1,4 +1,4 @@
-local fiu = (function()
+local funnyexecutor = (function()
 -- // Environment changes in the VM are not supposed to alter the behaviour of the VM so we localise globals beforehand
 local type = type
 local pcall = pcall
@@ -1494,7 +1494,6 @@ local function luau_load(module, env, luau_settings)
 					end
 				end
 
-				-- // Sync dbg_pc upvalue to debugging table for error diagnostics
 				debugging.pc = dbg_pc
 
 				local opname
@@ -1506,11 +1505,8 @@ local function luau_load(module, env, luau_settings)
 					opname = debugging.name or "UNKNOWN"
 				end
 
-				if proto.lineinfoenabled then
-					return error(string_format("Fiu VM Error { Name: %s Line: %s PC: %s Opcode: %s }: %s", proto.debugname, proto.instructionlineinfo[dbgpc], dbgpc, opname, message), 0)
-				else 
-					return error(string_format("Fiu VM Error { Name: %s PC: %s Opcode: %s }: %s", proto.debugname, dbgpc, opname, message), 0)
-				end
+				local clean_message = string.gsub(message, "^Name:.-}:%s*", "")
+				return error(string_format("FunnyVM VM Error: %s", clean_message), 0)
 			end
 		end
 
@@ -1569,7 +1565,6 @@ end
 
 local namecall_registry = setmetatable({}, {__mode = "k"})
 
--- set by init.luau (cache.invalidate / cache.replace), checked on game:GetService
 local service_cache = {}
 __funny_service_cache = service_cache
 
@@ -1641,12 +1636,12 @@ getnamecallmethod = function()
 end
 
 load_bytecode = function(bytecode, env)
-	local settings = fiu.luau_newsettings()
+	local settings = funny.luau_newsettings()
 	settings.vectorCtor = Vector3.new
 	settings.useNativeNamecall = true
 	settings.namecallHandler = namecall_handler
 
-	return (fiu.luau_load(bytecode, env or getfenv(), settings))
+	return (funny.luau_load(bytecode, env or getfenv(), settings))
 end
 
 task.spawn(function()
@@ -1660,14 +1655,14 @@ task.spawn(function()
 				local ran, err = pcall(func)
 
 				if not ran then
-					warn("FunnyExecutor bootstrap: init.luau error: " .. tostring(err))
+					warn("Funny Executor bootstrap: init.luau error: " .. tostring(err))
 				end
 
 				break
 			elseif ok then
-				warn("FunnyExecutor bootstrap: init.luau failed to load (bridge/bytecode mismatch?)")
+				warn("Funny Executor bootstrap: init.luau failed to load (bridge/bytecode mismatch?)")
 			else
-				warn("FunnyExecutor bootstrap: " .. tostring(func))
+				warn("Funny Executor bootstrap: " .. tostring(func))
 			end
 		end
 
