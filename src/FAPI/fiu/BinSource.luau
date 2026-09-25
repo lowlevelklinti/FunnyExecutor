@@ -1,3 +1,4 @@
+-- // Credits to theholytorch for giving the idea to rename the VM and shorten VM errors
 local funnyexecutor = (function()
 -- // Environment changes in the VM are not supposed to alter the behaviour of the VM so we localise globals beforehand
 local type = type
