@@ -1,3 +1,4 @@
+-- // Credits to theholytorch for giving the idea to rename the VM and shorten VM errors
 local http = game:GetService("HttpService")
 local bridge = "http://localhost:9475"
 
@@ -33,7 +34,6 @@ end
 
 local namecall_registry = setmetatable({}, {__mode = "k"})
 
--- set by init.luau (cache.invalidate / cache.replace), checked on game:GetService
 local service_cache = {}
 __funny_service_cache = service_cache
 
@@ -105,12 +105,12 @@ getnamecallmethod = function()
 end
 
 load_bytecode = function(bytecode, env)
-	local settings = fiu.luau_newsettings()
+	local settings = funny.luau_newsettings()
 	settings.vectorCtor = Vector3.new
 	settings.useNativeNamecall = true
 	settings.namecallHandler = namecall_handler
 
-	return (fiu.luau_load(bytecode, env or getfenv(), settings))
+	return (funny.luau_load(bytecode, env or getfenv(), settings))
 end
 
 task.spawn(function()
@@ -124,14 +124,14 @@ task.spawn(function()
 				local ran, err = pcall(func)
 
 				if not ran then
-					warn("FunnyExecutor bootstrap: init.luau error: " .. tostring(err))
+					warn("Funny Executor bootstrap: init.luau error: " .. tostring(err))
 				end
 
 				break
 			elseif ok then
-				warn("FunnyExecutor bootstrap: init.luau failed to load (bridge/bytecode mismatch?)")
+				warn("Funny Executor bootstrap: init.luau failed to load (bridge/bytecode mismatch?)")
 			else
-				warn("FunnyExecutor bootstrap: " .. tostring(func))
+				warn("Funny Executor bootstrap: " .. tostring(func))
 			end
 		end
 
