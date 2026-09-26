@@ -928,11 +928,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        source = _targetSource
+
         self.send_response(200)
         self.send_header('Content-Type', 'text/plain')
+        self.send_header('Content-Length', str(len(source)))
         self.end_headers()
 
-        self.wfile.write(_targetSource)
+        self.wfile.write(source)
 
     def do_POST(self):
         contentLength = int(self.headers.get('Content-Length', 0))
@@ -942,10 +945,9 @@ class Handler(BaseHTTPRequestHandler):
         method = args.pop(0).decode('utf-8')
 
         response = recvMethod(method, args)
-        print(response)
 
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")  # application/json
+        self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(response)))
         self.end_headers()
 
@@ -962,9 +964,13 @@ def startBridge():
     atexit.register(cleanupCustomAssets)
     synSaveInstancePrewarm()
 
+workspaceReady = False
+
 def createWorkspace():
-    if not (parent / 'workspace').is_dir():
-        os.mkdir(parent / 'workspace')
+    global workspaceReady
+    if not workspaceReady:
+        os.makedirs(parent / 'workspace', exist_ok=True)
+        workspaceReady = True
 
 def setSource(source: bytes):
     global _targetSource

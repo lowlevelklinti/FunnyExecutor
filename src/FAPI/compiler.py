@@ -4,6 +4,7 @@ import struct
 import subprocess
 import tempfile
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 import zstandard
@@ -11,6 +12,29 @@ import zstandard
 parent = Path(__file__).resolve().parent
 
 class BytecodeError(Exception): pass
+
+createNoWindow = 0x08000000
+compileCacheLimit = 128
+compileCache = OrderedDict()
+compilerPath = str(parent / 'luau' / 'compile.exe')
+
+def _cacheKey(source: str | bytes, chunkName: str):
+    if type(source) == str:
+        source = source.encode('utf-8')
+    return (source, chunkName)
+
+def _cacheGet(key):
+    try:
+        value = compileCache.pop(key)
+    except KeyError:
+        return None
+    compileCache[key] = value
+    return value
+
+def _cachePut(key, value):
+    compileCache[key] = value
+    while len(compileCache) > compileCacheLimit:
+        compileCache.popitem(last=False)
 
 windowsReserved = {
     'CON', 'PRN', 'AUX', 'NUL',
@@ -29,21 +53,28 @@ def safeChunkname(chunkName: str) -> str:
 class Luau:
     @staticmethod
     def compile(source: str | bytes, chunkName: str = ''):
+        key = _cacheKey(source, chunkName)
+        cached = _cacheGet(key)
+        if cached is not None:
+            return cached
+
         if chunkName:
             with tempfile.TemporaryDirectory(prefix='FunnyExecutor-Chunk-') as tmpdir:
                 name = safeChunkname(chunkName)
                 path = os.path.join(tmpdir, name)
                 Luau._writeSource(path, source)
                 result = subprocess.run(
-                    [parent/'luau'/'compile.exe', name, '--binary'],
+                    [compilerPath, name, '--binary'],
                     capture_output=True,
-                    cwd=tmpdir
+                    cwd=tmpdir,
+                    creationflags=createNoWindow
                 )
                 if result.returncode != 0:
                     raise BytecodeError(
                         'Luau compile error:\n'
                         + result.stderr.decode('utf-8', 'replace').strip()
                     )
+            _cachePut(key, result.stdout)
             return result.stdout
 
         path = tempfile.gettempdir() + f'\\FunnyExecutor-Temp-Source-{os.getpid()}-{time.time_ns()}.luau'
@@ -51,8 +82,9 @@ class Luau:
         try:
             Luau._writeSource(path, source)
             result = subprocess.run(
-                [parent/'luau'/'compile.exe', path, '--binary'],
-                capture_output=True
+                [compilerPath, path, '--binary'],
+                capture_output=True,
+                creationflags=createNoWindow
             )
             if result.returncode != 0:
                 raise BytecodeError(
@@ -65,6 +97,7 @@ class Luau:
             except OSError:
                 pass
 
+        _cachePut(key, result.stdout)
         return result.stdout
 
     @staticmethod
