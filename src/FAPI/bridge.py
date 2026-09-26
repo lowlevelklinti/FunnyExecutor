@@ -461,6 +461,19 @@ def recvMethod(method, args):
             return b'fail'
         return str(value).encode('ascii')
 
+    elif method == 'getgameinfo':
+        try:
+            place_id = int(base64.b64decode(args[0]).decode('utf-8'))
+            game_name = base64.b64decode(args[1]).decode('utf-8', 'replace')
+            creator = base64.b64decode(args[2]).decode('utf-8', 'replace')
+            game_state['placeId'] = place_id
+            game_state['gameName'] = game_name
+            game_state['creator'] = creator
+            game_state['timestamp'] = time.time()
+            return b'ok'
+        except Exception:
+            return b'fail'
+
     elif method == 'hash':
         try:
             data = base64.b64decode(args[1])
@@ -979,6 +992,8 @@ def setSource(source: bytes):
 _sdk = None
 _notifiedPids = set()
 _confirmedDms = set()
+
+game_state = {}
 
 def isDmConfirmed(dmAddr):
     return dmAddr in _confirmedDms
