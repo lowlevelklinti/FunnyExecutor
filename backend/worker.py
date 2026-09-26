@@ -7,12 +7,6 @@ import FAPI
 
 
 class RobloxWorker:
-    """Manages the FAPI executor lifecycle.
-
-    A daemon thread polls Roblox so a queued injection is retried until the
-    game is ready. Inject/execute requests return ``(ok, message)`` tuples
-    so the caller (pytauri command) can report back to the UI.
-    """
 
     def __init__(self):
         self.executor = None
@@ -23,8 +17,6 @@ class RobloxWorker:
         self._lastInjectTry = 0.0
         self._stop_event = threading.Event()
         self._thread = None
-
-    # lifecycle ---------------------------------------------------------
 
     def start(self):
         if self._thread is None or not self._thread.is_alive():
@@ -38,8 +30,6 @@ class RobloxWorker:
     def _run(self):
         while not self._stop_event.wait(0.25):
             self.poll()
-
-    # executor management -------------------------------------------------
 
     def ensureExecutor(self):
         if self.executor is not None and self.sdk is not None:
@@ -116,8 +106,6 @@ class RobloxWorker:
             print(e)
         finally:
             self._injecting = False
-
-    # requests from the UI ------------------------------------------------
 
     def requestInject(self) -> tuple[bool, str | None]:
         if not self.ensureExecutor():

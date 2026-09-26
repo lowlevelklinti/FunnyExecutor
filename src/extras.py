@@ -9,7 +9,6 @@ boldFont = 700
 _luauRules = None
 
 class LuauHighlighter(QSyntaxHighlighter):
-    # debugger
     _reBlockComment = re.compile(r"--\[\[.*?\]\]", re.DOTALL)
     _reLineComment = re.compile(r"--[^\n]*")
     _reDstring = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
@@ -237,7 +236,7 @@ class LuauHighlighter(QSyntaxHighlighter):
                         if name not in declaredPositions:
                             declaredPositions[name] = []
                         declaredPositions[name].append(absPos)
-                offset += len(rawName) + 1  # +1 for comma
+                offset += len(rawName) + 1
 
         for m in self._reLocalFunc.finditer(strippedText):
             name = m.group(1)
@@ -325,7 +324,6 @@ class LuauHighlighter(QSyntaxHighlighter):
                 match = matchIterator.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
-        # block comments
         self.setCurrentBlockState(0)
 
         if self.previousBlockState() != 1:

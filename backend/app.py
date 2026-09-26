@@ -1,10 +1,3 @@
-"""PyTauri backend for Funny Executor: pytauri commands wired to the FAPI worker.
-
-The frontend is Angelic's UI (HTML/CSS/JS with Monaco); these commands provide
-window controls, inject/execute, native file dialogs, key/value file storage
-and the scripts tree shown in the file explorer.
-"""
-
 import re
 import shutil
 from os import environ
@@ -31,15 +24,12 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 _worker: RobloxWorker | None = None
 
 
-def _get_worker() -> RobloxWorker:
+def _getWorker() -> RobloxWorker:
     global _worker
     if _worker is None:
         _worker = RobloxWorker()
         _worker.start()
     return _worker
-
-
-# ---------------------------------------------------------------- models
 
 
 class Empty(BaseModel):
@@ -51,7 +41,7 @@ class ScriptBody(BaseModel):
 
 
 class WindowBody(BaseModel):
-    action: str  # "minimize" | "toggleMaximize" | "close"
+    action: str
 
 
 class DialogBody(BaseModel):
@@ -93,26 +83,20 @@ class UrlBody(BaseModel):
     url: str
 
 
-# ---------------------------------------------------------------- executor commands
-
-
 @commands.command()
 async def inject(body: Empty, webview_window: WebviewWindow) -> dict:
-    ok, message = _get_worker().requestInject()
+    ok, message = _getWorker().requestInject()
     return {"ok": ok, "message": message}
 
 
 @commands.command()
-async def execute_script(body: ScriptBody, webview_window: WebviewWindow) -> dict:
-    ok, message = _get_worker().requestExecute(body.script)
+async def executeScript(body: ScriptBody, webview_window: WebviewWindow) -> dict:
+    ok, message = _getWorker().requestExecute(body.script)
     return {"ok": ok, "message": message}
 
 
-# ---------------------------------------------------------------- window commands
-
-
 @commands.command()
-async def window_control(body: WindowBody, webview_window: WebviewWindow) -> None:
+async def windowControl(body: WindowBody, webview_window: WebviewWindow) -> None:
     action = body.action
     if action == "minimize":
         webview_window.minimize()
@@ -125,14 +109,11 @@ async def window_control(body: WindowBody, webview_window: WebviewWindow) -> Non
         webview_window.close()
 
 
-# ---------------------------------------------------------------- dialogs
-
-
 @commands.command()
-async def open_file_dialog(body: Empty, webview_window: WebviewWindow) -> dict:
-    from backend.native_dialogs import open_file
+async def openFileDialog(body: Empty, webview_window: WebviewWindow) -> dict:
+    from backend.native_dialogs import openFile
 
-    result = open_file(LUA_FILTER)
+    result = openFile(LUA_FILTER)
     if not result:
         return {"canceled": True}
     path, text = result
@@ -140,10 +121,10 @@ async def open_file_dialog(body: Empty, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def save_file_dialog(body: DialogBody, webview_window: WebviewWindow) -> dict:
-    from backend.native_dialogs import save_file
+async def saveFileDialog(body: DialogBody, webview_window: WebviewWindow) -> dict:
+    from backend.native_dialogs import saveFile
 
-    result = save_file(
+    result = saveFile(
         default_name=body.default_name or "script.luau",
         content=body.content or "",
         extensions=LUA_FILTER,
@@ -154,19 +135,15 @@ async def save_file_dialog(body: DialogBody, webview_window: WebviewWindow) -> d
     return {"canceled": False, "name": Path(result).name, "path": result}
 
 
-# ---------------------------------------------------------------- key/value store
-
-
-def _store_path(name: str) -> Path:
-    # keep names simple, no traversal
+def _storePath(name: str) -> Path:
     safe = Path(name).name
     STORE_DIR.mkdir(parents=True, exist_ok=True)
     return STORE_DIR / safe
 
 
 @commands.command()
-async def read_store(body: TextBody, webview_window: WebviewWindow) -> str | None:
-    p = _store_path(body.text)
+async def readStore(body: TextBody, webview_window: WebviewWindow) -> str | None:
+    p = _storePath(body.text)
     if not p.is_file():
         return None
     try:
@@ -176,8 +153,8 @@ async def read_store(body: TextBody, webview_window: WebviewWindow) -> str | Non
 
 
 @commands.command()
-async def write_store(body: StoreBody, webview_window: WebviewWindow) -> None:
-    p = _store_path(body.name)
+async def writeStore(body: StoreBody, webview_window: WebviewWindow) -> None:
+    p = _storePath(body.name)
     try:
         p.write_text(body.content or "", encoding="utf-8")
     except OSError:
@@ -185,17 +162,14 @@ async def write_store(body: StoreBody, webview_window: WebviewWindow) -> None:
 
 
 @commands.command()
-async def remove_store(body: TextBody, webview_window: WebviewWindow) -> None:
+async def removeStore(body: TextBody, webview_window: WebviewWindow) -> None:
     try:
-        _store_path(body.text).unlink(missing_ok=True)
+        _storePath(body.text).unlink(missing_ok=True)
     except OSError:
         pass
 
 
-# ---------------------------------------------------------------- scripts tree
-
-
-def _inside_root(target: Path) -> bool:
+def _insideRoot(target: Path) -> bool:
     try:
         root = ROOT_DIR.resolve()
         target = target.resolve()
@@ -204,34 +178,32 @@ def _inside_root(target: Path) -> bool:
     return root != target and root in target.parents
 
 
-def _safe_script(path: str) -> Path | None:
-    """Resolve a script path and keep it inside the app data folder."""
+def _safeScript(path: str) -> Path | None:
     try:
         target = Path(path).expanduser().resolve()
     except (OSError, RuntimeError):
         return None
-    if not _inside_root(target) or target.suffix.lower() not in SCRIPT_EXTS:
+    if not _insideRoot(target) or target.suffix.lower() not in SCRIPT_EXTS:
         return None
     return target
 
 
-def _safe_folder(path: str | None, default: Path | None = None) -> Path | None:
-    """Resolve a folder inside the app data folder (never the root itself)."""
+def _safeFolder(path: str | None, default: Path | None = None) -> Path | None:
     if not path:
         return default
     try:
         target = Path(path).expanduser().resolve()
     except (OSError, RuntimeError):
         return None
-    return target if _inside_root(target) else None
+    return target if _insideRoot(target) else None
 
 
-def _clean_name(name: str) -> str:
+def _cleanName(name: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', (name or '').strip())
     return cleaned.strip('. ')[:64]
 
 
-def _free_path(directory: Path, name: str) -> Path:
+def _freePath(directory: Path, name: str) -> Path:
     stem, suffix = Path(name).stem, Path(name).suffix
     target = directory / name
     i = 2
@@ -241,7 +213,7 @@ def _free_path(directory: Path, name: str) -> Path:
     return target
 
 
-def _file_entry(p: Path) -> dict:
+def _fileEntry(p: Path) -> dict:
     try:
         stat = p.stat()
         size, modified = stat.st_size, int(stat.st_mtime)
@@ -250,7 +222,7 @@ def _file_entry(p: Path) -> dict:
     return {"name": p.name, "path": str(p), "size": size, "modified": modified}
 
 
-def _folder_entry(p: Path) -> dict:
+def _folderEntry(p: Path) -> dict:
     folders, files = [], []
     try:
         entries = sorted(p.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
@@ -259,31 +231,31 @@ def _folder_entry(p: Path) -> dict:
     for entry in entries:
         try:
             if entry.is_dir():
-                folders.append(_folder_entry(entry))
+                folders.append(_folderEntry(entry))
             elif entry.is_file() and entry.suffix.lower() in SCRIPT_EXTS:
-                files.append(_file_entry(entry))
+                files.append(_fileEntry(entry))
         except OSError:
             continue
     return {"name": p.name, "path": str(p), "folders": folders, "files": files}
 
 
 @commands.command()
-async def list_scripts(body: Empty, webview_window: WebviewWindow) -> dict:
+async def listScripts(body: Empty, webview_window: WebviewWindow) -> dict:
     ROOT_DIR.mkdir(parents=True, exist_ok=True)
     folders = []
     for key in BASE_FOLDERS:
         directory = ROOT_DIR / key
         try:
             directory.mkdir(parents=True, exist_ok=True)
-            folders.append(_folder_entry(directory))
+            folders.append(_folderEntry(directory))
         except OSError:
             continue
     return {"folders": folders}
 
 
 @commands.command()
-async def read_script(body: PathBody, webview_window: WebviewWindow) -> dict:
-    p = _safe_script(body.path)
+async def readScript(body: PathBody, webview_window: WebviewWindow) -> dict:
+    p = _safeScript(body.path)
     if p is None or not p.is_file():
         return {"ok": False, "message": "File not found"}
     try:
@@ -294,8 +266,8 @@ async def read_script(body: PathBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def write_script(body: WriteBody, webview_window: WebviewWindow) -> dict:
-    p = _safe_script(body.path)
+async def writeScript(body: WriteBody, webview_window: WebviewWindow) -> dict:
+    p = _safeScript(body.path)
     if p is None:
         return {"ok": False, "message": "Path is outside the scripts folder"}
     try:
@@ -307,17 +279,17 @@ async def write_script(body: WriteBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def new_script(body: NewBody, webview_window: WebviewWindow) -> dict:
-    name = _clean_name(body.name)
+async def newScript(body: NewBody, webview_window: WebviewWindow) -> dict:
+    name = _cleanName(body.name)
     if not name:
         return {"ok": False, "message": "No name given"}
     if Path(name).suffix.lower() not in SCRIPT_EXTS:
         name += ".luau"
 
-    directory = _safe_folder(body.folder) or (ROOT_DIR / BASE_FOLDERS[0])
+    directory = _safeFolder(body.folder) or (ROOT_DIR / BASE_FOLDERS[0])
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        target = _free_path(directory, name)
+        target = _freePath(directory, name)
         target.write_text("", encoding="utf-8")
     except OSError as e:
         return {"ok": False, "message": str(e)}
@@ -325,11 +297,11 @@ async def new_script(body: NewBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def create_folder(body: NewBody, webview_window: WebviewWindow) -> dict:
-    name = _clean_name(body.name)
+async def createFolder(body: NewBody, webview_window: WebviewWindow) -> dict:
+    name = _cleanName(body.name)
     if not name:
         return {"ok": False, "message": "No name given"}
-    parent = _safe_folder(body.folder) or (ROOT_DIR / BASE_FOLDERS[0])
+    parent = _safeFolder(body.folder) or (ROOT_DIR / BASE_FOLDERS[0])
     try:
         parent.mkdir(parents=True, exist_ok=True)
         target = parent / name
@@ -342,18 +314,18 @@ async def create_folder(body: NewBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def move_script(body: MoveBody, webview_window: WebviewWindow) -> dict:
-    source = _safe_script(body.path)
+async def moveScript(body: MoveBody, webview_window: WebviewWindow) -> dict:
+    source = _safeScript(body.path)
     if source is None or not source.is_file():
         return {"ok": False, "message": "File not found"}
-    dest = _safe_folder(body.folder)
+    dest = _safeFolder(body.folder)
     if dest is None or not dest.is_dir():
         return {"ok": False, "message": "Drop it on a folder"}
     if dest == source.parent:
         return {"ok": True, "path": str(source), "name": source.name}
     try:
         dest.mkdir(parents=True, exist_ok=True)
-        target = _free_path(dest, source.name)
+        target = _freePath(dest, source.name)
         shutil.move(str(source), str(target))
     except OSError as e:
         return {"ok": False, "message": str(e)}
@@ -361,13 +333,13 @@ async def move_script(body: MoveBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def move_folder(body: MoveBody, webview_window: WebviewWindow) -> dict:
-    source = _safe_folder(body.path)
+async def moveFolder(body: MoveBody, webview_window: WebviewWindow) -> dict:
+    source = _safeFolder(body.path)
     if source is None or not source.is_dir():
         return {"ok": False, "message": "Folder not found"}
     if source.parent == ROOT_DIR and source.name in BASE_FOLDERS:
         return {"ok": False, "message": "The main folders cannot be moved"}
-    dest = _safe_folder(body.folder)
+    dest = _safeFolder(body.folder)
     if dest is None or not dest.is_dir():
         return {"ok": False, "message": "Drop it on a folder"}
     if dest == source or source in dest.parents:
@@ -376,7 +348,7 @@ async def move_folder(body: MoveBody, webview_window: WebviewWindow) -> dict:
         return {"ok": True, "path": str(source), "name": source.name}
     try:
         dest.mkdir(parents=True, exist_ok=True)
-        target = _free_path(dest, source.name)
+        target = _freePath(dest, source.name)
         shutil.move(str(source), str(target))
     except OSError as e:
         return {"ok": False, "message": str(e)}
@@ -384,8 +356,8 @@ async def move_folder(body: MoveBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def delete_script(body: PathBody, webview_window: WebviewWindow) -> dict:
-    p = _safe_script(body.path)
+async def deleteScript(body: PathBody, webview_window: WebviewWindow) -> dict:
+    p = _safeScript(body.path)
     if p is None or not p.is_file():
         return {"ok": False, "message": "File not found"}
     try:
@@ -396,24 +368,21 @@ async def delete_script(body: PathBody, webview_window: WebviewWindow) -> dict:
 
 
 @commands.command()
-async def delete_folder(body: PathBody, webview_window: WebviewWindow) -> dict:
-    p = _safe_folder(body.path)
+async def deleteFolder(body: PathBody, webview_window: WebviewWindow) -> dict:
+    p = _safeFolder(body.path)
     if p is None or not p.is_dir():
         return {"ok": False, "message": "Folder not found"}
     try:
         shutil.rmtree(p)
         if p.parent == ROOT_DIR and p.name in BASE_FOLDERS:
-            p.mkdir(parents=True, exist_ok=True)  # keep the base folders around
+            p.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         return {"ok": False, "message": str(e)}
     return {"ok": True, "path": str(p)}
 
 
-# ---------------------------------------------------------------- script hub
-
-
 @commands.command()
-async def hub_fetch(body: UrlBody, webview_window: WebviewWindow) -> dict:
+async def hubFetch(body: UrlBody, webview_window: WebviewWindow) -> dict:
     url = (body.url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         return {"ok": False, "message": "Bad url"}
@@ -430,15 +399,11 @@ async def hub_fetch(body: UrlBody, webview_window: WebviewWindow) -> dict:
     return {"ok": True, "text": response.text}
 
 
-# ---------------------------------------------------------------- diagnostics
-
-
 LOG_FILE = ROOT_DIR / "ui.log"
 
 
 @commands.command()
-async def log_message(body: TextBody) -> dict:
-    """Append a frontend console line so startup problems are visible."""
+async def logMessage(body: TextBody) -> dict:
     try:
         with LOG_FILE.open("a", encoding="utf-8") as fh:
             fh.write(str(body.text) + "\n")
@@ -447,14 +412,10 @@ async def log_message(body: TextBody) -> dict:
     return {"ok": True}
 
 
-# ---------------------------------------------------------------- app bootstrap
-
-
 def main() -> int:
-    """Run the tauri-app."""
     from anyio.from_thread import start_blocking_portal
 
-    _get_worker()  # start polling for Roblox before the window shows
+    _getWorker()
 
     src_tauri_dir = Path(__file__).parent.parent.absolute()
 

@@ -191,7 +191,6 @@
     padding: 10px 6px 0 6px;
   }
 
-  /* ---- editor tabs ---- */
   .tabstrip {
     display: flex;
     align-items: center;
@@ -269,7 +268,6 @@
   }
   .tab-add:hover { background: var(--btn-hover); color: #fff; }
 
-  /* ---- editor body + file explorer ---- */
   .editor-body {
     display: flex;
     min-width: 0;
@@ -484,7 +482,6 @@
   .explorer-foot .tree-add:hover { background: #1f1f1f; color: #fff; }
   .tree-empty { padding: 14px 6px; font-size: 12.5px; color: #6a6a6a; }
 
-  /* app intro (same treatment as Madium) */
   .loading-screen {
     position: fixed; inset: 0; z-index: 1000;
     display: grid; place-items: center;
@@ -1049,35 +1046,34 @@
   const pyInvoke = (cmd, body) =>
     T && T.pytauri ? T.pytauri.pyInvoke(cmd, body) : Promise.reject(new Error('backend unavailable'));
 
-  const logUi = text => { pyInvoke('log_message', { text: String(text) }).catch(() => {}); };
+  const logUi = text => { pyInvoke('logMessage', { text: String(text) }).catch(() => {}); };
   addEventListener('error', ev => logUi('ERROR ' + ev.message + ' @' + (ev.lineno || '?')));
   addEventListener('unhandledrejection', ev => logUi('REJECT ' + ((ev.reason && ev.reason.message) || ev.reason)));
 
   const Store = {
-    // persistence lives in the Python backend (%APPDATA%/FunnyExecutor)
     async init() {},
     async read(name) {
-      try { return await pyInvoke('read_store', { text: name }); }
+      try { return await pyInvoke('readStore', { text: name }); }
       catch (_) { return null; }
     },
     async write(name, text) {
-      try { await pyInvoke('write_store', { name, content: text }); } catch (_) {}
+      try { await pyInvoke('writeStore', { name, content: text }); } catch (_) {}
     },
     async remove(name) {
-      try { await pyInvoke('remove_store', { text: name }); } catch (_) {}
+      try { await pyInvoke('removeStore', { text: name }); } catch (_) {}
     }
   };
 
   const DEFAULTS = { fontSize: 12, tabSize: 4, useSpaces: true, minimap: true };
   let settings = { ...DEFAULTS };
-  let profile = null;           // { username, avatar }
+  let profile = null;
   let currentPage = 'home';
   let hubProvider = 'scriptblox', hubSort = 'date', hubPage = 1, hubPages = 1;
   let hubScripts = [], hubQuery = '', hubLoading = false;
 
-  $('#btnMin').addEventListener('click', () => { pyInvoke('window_control', { action: 'minimize' }).catch(() => {}); });
-  $('#btnMax').addEventListener('click', () => { pyInvoke('window_control', { action: 'toggleMaximize' }).catch(() => {}); });
-  $('#btnClose').addEventListener('click', () => { pyInvoke('window_control', { action: 'close' }).catch(() => {}); });
+  $('#btnMin').addEventListener('click', () => { pyInvoke('windowControl', { action: 'minimize' }).catch(() => {}); });
+  $('#btnMax').addEventListener('click', () => { pyInvoke('windowControl', { action: 'toggleMaximize' }).catch(() => {}); });
+  $('#btnClose').addEventListener('click', () => { pyInvoke('windowControl', { action: 'close' }).catch(() => {}); });
 
   (() => {
     const img = $('#logoImg');
@@ -1145,7 +1141,7 @@
   $('#executeBtn').addEventListener('click', async () => {
     if (!editor) return;
     try {
-      const res = await pyInvoke('execute_script', { script: getText() });
+      const res = await pyInvoke('executeScript', { script: getText() });
       if (res && !res.ok && res.message) toast(res.message);
     } catch (_) {}
   });
@@ -1159,7 +1155,6 @@
     icon.hidden = has;
   }
 
-  /* ---- script hub (providers borrowed from Madium) ---- */
   const PROVIDERS = [
     { id: 'scriptblox', label: 'ScriptBlox', logo: 'resources/providers/scriptblox.svg', sorts: [] },
     { id: 'rscripts', label: 'Rscripts', logo: 'resources/providers/rscripts.svg', sorts: [['Latest', 'date'], ['Views', 'views'], ['Likes', 'likes']] },
@@ -1269,7 +1264,7 @@
   }
 
   async function hubText(url) {
-    const res = await pyInvoke('hub_fetch', { url });
+    const res = await pyInvoke('hubFetch', { url });
     if (!res || !res.ok) throw new Error((res && res.message) || 'request failed');
     return res.text;
   }
@@ -1413,7 +1408,6 @@
   const getText = () => editor ? editor.getValue() : '';
   const setLang = lang => { if (editor) monaco.editor.setModelLanguage(editor.getModel(), lang); };
 
-  /* ---- editor tabs ---- */
   const tabsEl = $('#tabs');
   const activeTab = () => tabs.find(t => t.id === activeTabId) || null;
   const uniqueName = base => {
@@ -1518,7 +1512,6 @@
       list = saved.tabs;
       activeIndex = Number(saved.active) || 0;
     } else if (Array.isArray(saved)) {
-      // one-time migration of the old desktop tabs.json ([active, [name, text], ...])
       activeIndex = Number(saved[0]) || 0;
       list = saved.slice(1)
         .filter(e => Array.isArray(e) && typeof e[0] === 'string')
@@ -1530,7 +1523,6 @@
     for (const t of list) {
       if (!t || typeof t.text !== 'string') continue;
       let text = t.text;
-      // a tab bound to a real file always takes the current file content
       if (t.path && !t.external) {
         const disk = await readScript(t.path);
         if (disk && disk.ok) text = disk.content || '';
@@ -1543,7 +1535,6 @@
     setActiveTab(idx >= 0 ? tabs[idx].id : tabs[0].id);
   }
 
-  /* keep every file-backed tab on disk when the window goes away */
   function flushOnExit() {
     clearTimeout(tabSaveTimer);
     for (const t of tabs) {
@@ -1551,7 +1542,7 @@
       const text = t.model.getValue();
       if (text === t.saved) continue;
       t.saved = text;
-      pyInvoke('write_script', { path: t.path, content: text });
+      pyInvoke('writeScript', { path: t.path, content: text });
     }
     const payload = {
       active: Math.max(0, tabs.findIndex(t => t.id === activeTabId)),
@@ -1850,7 +1841,7 @@
 
     if (!saveAs && tab.path && !tab.external) {
       try {
-        const res = await pyInvoke('write_script', { path: tab.path, content: text });
+        const res = await pyInvoke('writeScript', { path: tab.path, content: text });
         if (!res || !res.ok) { toast((res && res.message) || 'Could not save the file'); return; }
         tab.saved = text;
         dirtyModels.delete(tab.model);
@@ -1866,7 +1857,7 @@
 
     const suggested = tab.name || (currentLang() === 'lua' ? 'script.lua' : 'script.luau');
     try {
-      const res = await pyInvoke('save_file_dialog', {
+      const res = await pyInvoke('saveFileDialog', {
         default_name: suggested,
         content: text,
         title: saveAs ? 'Save As' : 'Save File'
@@ -1895,7 +1886,7 @@
   async function openFile() {
     if (!editor) return;
     try {
-      const res = await pyInvoke('open_file_dialog', {});
+      const res = await pyInvoke('openFileDialog', {});
       if (!res || res.canceled) return;
       openTab(res.name, res.content || '', res.path, { external: true });
       toast('Opened ' + res.name);
@@ -1905,7 +1896,6 @@
     }
   }
 
-  /* ---- file explorer ---- */
   const pill = $('#explorerPill');
   const panel = $('#explorerPanel');
   const grip = $('#explorerGrip');
@@ -2042,7 +2032,7 @@
     if (refreshBusy) return;
     refreshBusy = true;
     try {
-      const next = (await pyInvoke('list_scripts', {})) || { folders: [] };
+      const next = (await pyInvoke('listScripts', {})) || { folders: [] };
       const sig = treeSignature(next);
       scriptTree = next;
       if (sig === treeSig) { markActiveFile(); return; }
@@ -2056,7 +2046,6 @@
     }
   }
 
-  /* keep the file list in sync with disk */
   const treeRoot = treeEl.closest('.explorer') || treeEl.parentElement;
   setInterval(() => {
     if (dragPath || refreshBusy) return;
@@ -2065,16 +2054,15 @@
   }, 2000);
 
   async function readScript(path) {
-    try { return await pyInvoke('read_script', { path }); } catch (_) { return null; }
+    try { return await pyInvoke('readScript', { path }); } catch (_) { return null; }
   }
 
   async function openFileAt(path) {
-    const res = await pyInvoke('read_script', { path });
+    const res = await pyInvoke('readScript', { path });
     if (!res || !res.ok) { toast((res && res.message) || 'Could not open the file'); return null; }
     return res;
   }
 
-  /* ---- ask dialog (blurred popup, same as the profile one) ---- */
   const askOverlay = $('#askOverlay');
   const askTitle = $('#askTitle');
   const askSub = $('#askSub');
@@ -2133,7 +2121,7 @@
       ask({
         title: 'Delete script?', sub: name, ok: 'Delete', danger: true,
         onOk: async () => {
-          const res = await pyInvoke('delete_script', { path });
+          const res = await pyInvoke('deleteScript', { path });
           if (!res || !res.ok) { toast((res && res.message) || 'Could not delete the file'); return; }
           treeSig = '';
           const open = tabs.find(t => t.path === path);
@@ -2153,7 +2141,7 @@
       ask({
         title: 'Delete folder?', sub: 'Everything inside ' + name + ' is deleted too.', ok: 'Delete', danger: true,
         onOk: async () => {
-          const res = await pyInvoke('delete_folder', { path });
+          const res = await pyInvoke('deleteFolder', { path });
           if (!res || !res.ok) { toast((res && res.message) || 'Could not delete the folder'); return; }
           treeSig = '';
           await refreshExplorer();
@@ -2172,7 +2160,6 @@
     }
   });
 
-  /* drag scripts or folders onto another folder to move them, onto a tab to open them */
   let dragPath = null, dragKind = null;
   const clearDropMarks = root => { for (const el of $$('.drop', root)) el.classList.remove('drop'); };
   const allowDrop = (ev, el) => {
@@ -2213,7 +2200,7 @@ treeEl.addEventListener('drop', async ev => {
   dragPath = null; dragKind = null;
   if (!path || !label.dataset.folder) return;
   const dest = label.dataset.folder;
-  const res = await pyInvoke(kind === 'folder' ? 'move_folder' : 'move_script', { path, folder: dest });
+  const res = await pyInvoke(kind === 'folder' ? 'moveFolder' : 'moveScript', { path, folder: dest });
   if (!res || !res.ok) { toast((res && res.message) || 'Could not move it'); return; }
   if (kind === 'script') {
     const open = tabs.find(t => t.path === path);
@@ -2270,7 +2257,7 @@ treeEl.addEventListener('drop', async ev => {
         const name = askInput.value.trim();
         if (!name) return;
         const parent = parentFolder();
-        const res = await pyInvoke('new_script', { name, folder: parent });
+        const res = await pyInvoke('newScript', { name, folder: parent });
         if (!res || !res.ok) { toast((res && res.message) || 'Could not create the script'); return; }
         ensureVisible(parent);
         openTab(res.name, res.content || '', res.path);
@@ -2287,7 +2274,7 @@ $('#newFolderBtn').addEventListener('click', () => {
     onOk: async () => {
       const name = askInput.value.trim();
       if (!name) return;
-      const res = await pyInvoke('create_folder', { name, folder: '' });
+      const res = await pyInvoke('createFolder', { name, folder: '' });
       if (!res || !res.ok) { toast((res && res.message) || 'Could not create the folder'); return; }
       ensureVisible('');
       await refreshExplorer();
@@ -2455,7 +2442,7 @@ $('#newFolderBtn').addEventListener('click', () => {
   overlay.addEventListener('mousedown', ev => { if (ev.target === overlay && !modalFirst) closeProfile(); });
   overlay.addEventListener('keydown', ev => {
     if (ev.key === 'Escape' && !modalFirst) { closeProfile(); return; }
-    if (ev.key === 'Tab') {                       // keep focus inside the popup
+    if (ev.key === 'Tab') {
       const f = $$('button, input[type=text]', modal).filter(el => !el.hidden && !el.disabled && el.offsetParent !== null);
       if (!f.length) return;
       const first = f[0], last = f[f.length - 1];

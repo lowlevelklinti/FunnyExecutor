@@ -1,5 +1,3 @@
-"""Native Win32 file dialogs (replaces QFileDialog). ctypes-based, no Qt."""
-
 import ctypes
 import ctypes.wintypes as wt
 
@@ -35,17 +33,16 @@ class OPENFILENAMEW(ctypes.Structure):
     ]
 
 
-def _build_filter(extensions):
+def _buildFilter(extensions):
     exts = [e.lstrip('*.') for e in (extensions or ['*'])]
     pattern = ';'.join('*.' + e for e in exts)
     return 'Scripts (%s)|%s|All files (*.*)|*.*|' % (pattern, pattern)
 
 
-def open_file(extensions, title='Open File'):
-    """Returns (path, text) or None on cancel."""
+def openFile(extensions, title='Open File'):
     file_buf = ctypes.create_unicode_buffer(32768)
     filter_buf = ctypes.create_unicode_buffer(
-        _build_filter(extensions).replace('|', '\0') + '\0')
+        _buildFilter(extensions).replace('|', '\0') + '\0')
 
     ofn = OPENFILENAMEW()
     ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
@@ -69,11 +66,10 @@ def open_file(extensions, title='Open File'):
         return path, ''
 
 
-def save_file(default_name, content, extensions, title='Save File'):
-    """Returns saved path or None on cancel."""
+def saveFile(default_name, content, extensions, title='Save File'):
     file_buf = ctypes.create_unicode_buffer(default_name or 'script.luau')
     filter_buf = ctypes.create_unicode_buffer(
-        _build_filter(extensions).replace('|', '\0') + '\0')
+        _buildFilter(extensions).replace('|', '\0') + '\0')
 
     ofn = OPENFILENAMEW()
     ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
