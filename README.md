@@ -7,6 +7,10 @@
 
 ---
 
+### How to run Funny Executor
+
+> Install python 3.12 from https://www.python.org/downloads/release/python-3120/ and then choose add to path on the installer, next navigate to your funny executor downloaded directory in CMD and then run "pip install -r requirements.txt" or if that does work then you can try "py -3.12 -m pip install -r requirements.txt" and then once that is installed you can do py -3.12 main.py (If that doesn't work then you may not be in the full directory try cding into another funnyexecutor-main folder if it exists)
+
 ## Compatiblity Status
 
 | Tests                                  | Result |
@@ -32,7 +36,9 @@
 
 ---
 
-## Support
+### Project Owners
+
+> This project is currently owned by theholytorch and funnyfreak228\_ on discord
 
 ### Project Donations
 
