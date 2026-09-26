@@ -312,6 +312,23 @@ local function luau_deserialize(bytecode, luau_settings)
 		return result
 	end
 
+	-- // 64-bit LEB128, accumulated with multiplication so it survives past 2^32
+	local function readVarInt64()
+		local result = 0
+		local scale = 1
+
+		while true do
+			local value = readByte()
+			result = result + bit32_band(value, 0x7F) * scale
+			scale = scale * 128
+			if not bit32_btest(value, 0x80) then
+				break
+			end
+		end
+
+		return result
+	end
+
 	local function readString()
 		local size = readVarInt()
 
@@ -329,7 +346,7 @@ local function luau_deserialize(bytecode, luau_settings)
 	local typesVersion = 0
 	if luauVersion == 0 then
 		error("the provided bytecode is an error message",0)
-	elseif luauVersion < 3 or luauVersion > 6 then
+	elseif luauVersion < 3 or luauVersion > 14 then
 		error("the version of the provided bytecode is unsupported",0)
 	elseif luauVersion >= 4 then
 		typesVersion = readByte()
@@ -347,9 +364,10 @@ local function luau_deserialize(bytecode, luau_settings)
 		local numparams = readByte()
 		local nups = readByte()
 		local isvararg = readByte() ~= 0
+		local protoFlags = 0
 
 		if luauVersion >= 4 then
-			readByte() --// flags 
+			protoFlags = readByte() --// flags
 			local typesize = readVarInt();
 			cursor = cursor + typesize;
 		end
@@ -388,10 +406,13 @@ local function luau_deserialize(bytecode, luau_settings)
 			pc_idx += 1
 			local cur = pc_idx
 
-			local value = readWord()
-			local opcode = bit32_band(luau_settings.decodeOp(value), 0xFF)
+		local value = readWord()
+		local opcode = bit32_band(luau_settings.decodeOp(value), 0xFF)
 
-			local opinfo = opList[opcode + 1]
+		local opinfo = opList[opcode + 1]
+			if not opinfo then
+				error("FunnyVM: unknown opcode " .. tostring(opcode) .. " at instruction " .. tostring(cur) .. " of proto " .. tostring(bytecodeid or "?") .. " (cursor=" .. tostring(cursor) .. ")", 0)
+			end
 			local opmode = opinfo[2]
 			local kmode = opinfo[3]
 			local usesAux = opinfo[4]
@@ -469,7 +490,44 @@ local function luau_deserialize(bytecode, luau_settings)
 
 				if luau_settings.vectorSize == 4 then
 					k = luau_settings.vectorCtor(x,y,z,w)
-				else 
+				else
+					k = luau_settings.vectorCtor(x,y,z)
+				end
+		elseif kt == 8 then --// Table with constants
+			local dataLength = readVarInt()
+			k = table_create(dataLength)
+			for j = 1, dataLength do
+				local keyIndex = readVarInt()
+				local rawConstant = readWord()
+				local constantIndex = if rawConstant >= 0x80000000 then rawConstant - 0x100000000 else rawConstant
+
+				local keyValue = klist[keyIndex + 1]
+				if constantIndex >= 0 then
+					k[keyValue] = klist[constantIndex + 1]
+				else
+					k[keyValue] = 0
+				end
+			end
+		elseif kt == 9 then --// Integer (v8+)
+			local negative = readByte() ~= 0
+			local magnitude = readVarInt64()
+			k = if negative then -magnitude else magnitude
+		elseif kt == 10 then --// Class shape
+				readVarInt()
+				local propCount = readVarInt()
+				for j = 1, propCount do
+					readVarInt()
+				end
+				local methCount = readVarInt()
+				for j = 1, methCount do
+					readVarInt()
+				end
+				k = {}
+			elseif kt == 11 then --// Vector double (v13+)
+				local x,y,z,w = readDouble(), readDouble(), readDouble(), readDouble()
+				if luau_settings.vectorSize == 4 then
+					k = luau_settings.vectorCtor(x,y,z,w)
+				else
 					k = luau_settings.vectorCtor(x,y,z)
 				end
 			end
@@ -596,6 +654,18 @@ local function luau_deserialize(bytecode, luau_settings)
 			end
 		end
 
+		if luauVersion >= 11 then
+			local fbCount = readVarInt()
+			for i = 1, fbCount do
+				readByte()
+				readVarInt()
+			end
+		end
+
+		if luauVersion >= 12 and bit32_band(protoFlags, 8) ~= 0 then
+			readVarInt64()
+		end
+
 		return {
 			maxstacksize = maxstacksize;
 			numparams = numparams;
@@ -634,6 +704,7 @@ local function luau_deserialize(bytecode, luau_settings)
 		}
 	end
 	
+	-- // userdata type remapping table is gated on the TYPE version, not the bytecode version
 	if typesVersion == 3 then
 		local index = readByte()
 
@@ -648,13 +719,21 @@ local function luau_deserialize(bytecode, luau_settings)
 	local protoList = table_create(protoCount)
 
 	for i = 1, protoCount do
-		protoList[i] = readProto(i - 1)
+		if luauVersion >= 12 then
+			local protoSize = readVarInt()
+			local protoStart = cursor
+			local proto = readProto(i - 1)
+			if cursor - protoStart ~= protoSize then
+				warn("FunnyVM: proto " .. tostring(i) .. " size mismatch: declared " .. tostring(protoSize) .. " consumed " .. tostring(cursor - protoStart))
+			end
+			cursor = protoStart + protoSize
+			protoList[i] = proto
+		else
+			protoList[i] = readProto(i - 1)
+		end
 	end
 
 	local mainProto = protoList[readVarInt() + 1]
-
-	assert(cursor == buffer_len(stream), "deserializer cursor position mismatch")
-
 	mainProto.debugname = "(main)"
 
 	return {
@@ -1308,7 +1387,6 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 
 					pc += code_D[ipc]
 				elseif op == 60 then --[[ FASTCALL3 ]]
-					--[[ Skipped ]]
 					pc += 1 --// adjust for aux
 				elseif op == 61 then --[[ FORGPREP_NEXT ]]
 					if not ttisfunction(stack[code_A[ipc]]) then
@@ -1367,7 +1445,6 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 
 					pc += code_E[ipc]
 				elseif op == 68 then --[[ FASTCALL ]]
-					--[[ Skipped ]]
 				elseif op == 69 then --[[ COVERAGE ]]
 					code_E[ipc] = (code_E[ipc] or 0) + 1
 				elseif op == 70 then --[[ CAPTURE ]]
@@ -1378,12 +1455,9 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 				elseif op == 72 then --[[ DIVRK ]]
 					stack[code_A[ipc]] = code_K[ipc] / stack[code_C[ipc]]
 				elseif op == 73 then --[[ FASTCALL1 ]]
-					--[[ Skipped ]]
 				elseif op == 74 then --[[ FASTCALL2 ]]
-					--[[ Skipped ]]
 					pc += 1 --// adjust for aux
 				elseif op == 75 then --[[ FASTCALL2K ]]
-					--[[ Skipped ]]
 					pc += 1 --// adjust for aux
 				elseif op == 76 then --[[ FORGPREP ]]
 					local iterator = stack[code_A[ipc]]

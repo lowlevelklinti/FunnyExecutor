@@ -402,7 +402,6 @@ local renv_table = {
 	wait = wait,
 	spawn = spawn,
 	delay = delay,
-	require = require,
 	math = math,
 	string = string,
 	table = table,
@@ -946,6 +945,7 @@ debug.info = function(f, what)
 	end
 
 	if type(target) == 'function' and cClosureMarkers[target] then
+		local markerName = cClosureMarkers[target]
 		local vals = {}
 		local count = 0
 		local options = type(what) == 'string' and what or ''
@@ -953,7 +953,7 @@ debug.info = function(f, what)
 			local opt = options:sub(i, i)
 			if opt == 'n' then
 				count += 1
-				vals[count] = ''
+				vals[count] = type(markerName) == 'string' and markerName or ''
 			elseif opt == 'a' then
 				count += 2
 				vals[count - 1] = -1
@@ -1279,7 +1279,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'Funny Executor', 'v0.554'
+	return 'Funny Executor', 'v0.555'
 end
 
 getexecutorname = function()
@@ -1290,14 +1290,19 @@ getexecutorversion = function()
 	return select(2, identifyexecutor())
 end
 
--- executor env extensions
+-- env extensions
 
-newcclosure = function(func)
+newcclosure = function(func, name)
 	assert(type(func) == 'function', "invalid argument #1 to 'newcclosure' (function expected, got " .. type(func) .. ')', 2)
 	local wrapper = function(...)
 		return func(...)
 	end
-	cClosureMarkers[wrapper] = true
+	local closureName = name
+	if type(closureName) ~= 'string' then
+		local okn, original = pcall(real_debug_info, func, 'n')
+		closureName = (okn and type(original) == 'string') and original or ''
+	end
+	cClosureMarkers[wrapper] = closureName
 	return wrapper
 end
 
@@ -1319,7 +1324,7 @@ iscclosure = function(func)
 	return debug.info(func, 's') == '[C]'
 end
 
--- cloneref / compareinstances
+-- cloneref
 
 local clonerefs = {}
 setmetatable(clonerefs, {__mode = 'kv'})
@@ -1332,7 +1337,7 @@ local function clone_target(proxy)
 	return obj
 end
 
-cloneref = function(obj)
+local cloneref = function(obj)
 	local proxy = newproxy(true)
 	local meta = getmetatable(proxy)
 	clonerefs[proxy] = obj
@@ -1357,31 +1362,6 @@ cloneref = function(obj)
 	end
 	meta.__metatable = getmetatable(obj)
 	return proxy
-end
-
-local function is_instance_like(v)
-	if type(v) == 'userdata' then
-		return true
-	end
-	if type(v) == 'table' then
-		local mt = getmetatable(v)
-		if type(mt) == 'table' and rawget(mt, '__funnyinstance') then
-			return true
-		end
-	end
-	return false
-end
-
-compareinstances = function(a, b)
-	assert(is_instance_like(a), "invalid argument #1 to 'compareinstances' (Instance expected, got " .. typeof(a) .. ')', 2)
-	assert(is_instance_like(b), "invalid argument #2 to 'compareinstances' (Instance expected, got " .. typeof(b) .. ')', 2)
-	if clonerefs[a] then
-		a = clonerefs[a]
-	end
-	if clonerefs[b] then
-		b = clonerefs[b]
-	end
-	return a == b
 end
 
 local rtypeof = typeof
@@ -1803,6 +1783,7 @@ function Drawing.new(class, properties)
 			end)
 		end
 		entry.instances = {}
+		entry.state.__OBJECT_EXISTS = false
 		drawing_objects[proxy] = nil
 	end
 
@@ -2135,6 +2116,66 @@ local function closure_entry(func)
 	return entry
 end
 
+isexecutorclosure = function(func)
+	if type(func) ~= 'function' then
+		return false
+	end
+	local info = vm_registry('__funny_closure_info')
+	return type(info) == 'table' and type(info[func]) == 'table'
+end
+checkclosure = isexecutorclosure
+isourclosure = isexecutorclosure
+
+getfunctionhash = function(func)
+	if type(func) ~= 'function' then
+		error("invalid argument #1 to 'getfunctionhash' (function expected, got " .. type(func) .. ')', 2)
+	end
+	local info = vm_registry('__funny_closure_info')
+	if type(info) ~= 'table' or type(info[func]) ~= 'table' then
+		error("unable to hash a C closure", 2)
+	end
+	local proto = info[func].proto
+	if type(proto) ~= 'table' then
+		error("unable to hash a C closure", 2)
+	end
+	local parts = {
+		tostring(proto.numparams or 0),
+		tostring(proto.nups or 0),
+		tostring(proto.isvararg and 1 or 0),
+		tostring(proto.maxstacksize or 0),
+		tostring(proto.sizecode or 0),
+	}
+	local k = proto.k
+	if type(k) == 'table' then
+		local seg = {}
+		for i = 1, #k do
+			seg[i] = tostring(k[i])
+		end
+		parts[#parts + 1] = table.concat(seg, ',')
+	else
+		parts[#parts + 1] = ''
+	end
+	local arrays = {'code_op', 'code_A', 'code_B', 'code_C', 'code_D', 'code_E', 'code_K', 'code_K0', 'code_K1', 'code_K2', 'code_KC', 'code_KN', 'code_aux'}
+	for _, name in ipairs(arrays) do
+		local arr = proto[name]
+		if type(arr) == 'table' then
+			local seg = table.create(#arr)
+			for i = 1, #arr do
+				seg[i] = tostring(arr[i])
+			end
+			parts[#parts + 1] = table.concat(seg, ',')
+		else
+			parts[#parts + 1] = ''
+		end
+	end
+	local data = table.concat(parts, '|')
+	local response = send_method('hash', 'sha384', base64encode(data))
+	if response == nil or response == 'fail' then
+		error("getfunctionhash: hash failed", 2)
+	end
+	return response:gsub('\n', '')
+end
+
 local function debugGetConstant(func, index)
 	local entry = closure_entry(func)
 	local proto = entry.proto
@@ -2325,121 +2366,75 @@ getscripts = function()
 	return result
 end
 
-
-getrunningscripts = function()
-	local result = {}
-	for _, inst in ipairs(getscripts()) do
-		local ok, running = pcall(function()
-			if inst.Parent == nil then
-				return false
-			end
-			local full_name = inst:GetFullName()
-			if full_name:find('CoreGui', 1, true) or full_name:find('CorePackages', 1, true) then
-				return false
-			end
-			local oke, enabled = pcall(function()
-				return inst.Enabled
-			end)
-			if oke and enabled == false then
-				return false
-			end
-			if inst:FindFirstAncestorOfClass('Actor') ~= nil then
-				return false
-			end
-			local okm, isModule = pcall(function()
-				return inst:IsA('ModuleScript')
-			end)
-			if okm and isModule then
-				return false
-			end
-			local okl, isLocal = pcall(function()
-				return inst:IsA('LocalScript')
-			end)
-			if okl and isLocal then
-				local player = game:GetService('Players').LocalPlayer
-				if player ~= nil then
-					if inst:IsDescendantOf(player) then
-						return true
-					end
-					local okc, character = pcall(function()
-						return player.Character
-					end)
-					if okc and character ~= nil and inst:IsDescendantOf(character) then
-						return true
-					end
-				end
-				local rf = game:GetService('ReplicatedFirst')
-				return inst:IsDescendantOf(rf)
-			end
-			return true
-		end)
-		if ok and running then
-			result[#result + 1] = inst
-		end
-	end
-	return result
+local readonly_inner = setmetatable({}, {__mode = 'k'})
+local readonly_meta = {}
+readonly_meta.__index = function(t, k)
+	local inner = readonly_inner[t]
+	return inner and inner[k]
+end
+readonly_meta.__newindex = function()
+	error("attempt to modify a readonly table", 2)
 end
 
-local loaded_modules = setmetatable({}, {__mode = 'k'})
+local function make_readonly(tbl)
+	if type(tbl) ~= 'table' then
+		return tbl
+	end
+	if getmetatable(tbl) == readonly_meta then
+		return tbl
+	end
 
-local script_envs = setmetatable({}, {__mode = 'k'})
+	local inner = {}
+	for k, v in pairs(tbl) do
+		inner[k] = v
+	end
+	readonly_inner[tbl] = inner
 
-local function module_env(mod)
-	local env = setmetatable({script = mod, require = require}, {__index = getfenv()})
-	script_envs[mod] = env
-	return env
+	for k in pairs(tbl) do
+		tbl[k] = nil
+	end
+
+	setmetatable(tbl, readonly_meta)
+	return tbl
 end
 
-require = function(mod)
-	assert(typeof(mod) == 'Instance', "invalid argument #1 to 'require' (ModuleScript expected, got " .. typeof(mod) .. ')', 2)
-	local okm, ism = pcall(function()
-		return mod:IsA('ModuleScript')
-	end)
-	if not okm or not ism then
-		error("invalid argument #1 to 'require' (ModuleScript expected, got " .. typeof(mod) .. ')', 2)
-	end
-
-	if loaded_modules[mod] ~= nil then
-		return loaded_modules[mod]
-	end
-
-	local bytecode = getscriptbytecode(mod)
-	if not bytecode or #bytecode == 0 then
-		error('require: failed to get bytecode for ' .. tostring(mod), 2)
-	end
-
-	local chunk = load_bytecode(bytecode, module_env(mod))
-	local result = chunk()
-	loaded_modules[mod] = result
-	return result
+local _real_table = table
+local _table_proxy = {}
+for k, v in pairs(_real_table) do
+	_table_proxy[k] = v
+end
+_table_proxy.freeze = function(tbl)
+	make_readonly(tbl)
+	return tbl
+end
+_table_proxy.isfrozen = function(tbl)
+	return type(tbl) == 'table' and getmetatable(tbl) == readonly_meta
 end
 
-getloadedmodules = function()
-	local result = {}
-	for mod in pairs(loaded_modules) do
-		result[#result + 1] = mod
-	end
-	return result
+getfenv().table = _table_proxy
+if type(_G) == 'table' then
+	_G.table = _table_proxy
 end
-
-getsenv = function(scr)
-	assert(typeof(scr) == 'Instance' and scr:IsA('LuaSourceContainer'), "invalid argument #1 to 'getsenv' (LuaSourceContainer expected, got " .. typeof(scr) .. ')', 2)
-
-	local ok, enabled = pcall(function()
-		return scr.Enabled
-	end)
-	if ok and enabled == false then
-		return nil
-	end
-
-	return script_envs[scr]
-end
-
--- isreadonly
 
 isreadonly = function(tbl)
 	assert(type(tbl) == 'table', "invalid argument #1 to 'isreadonly' (table expected, got " .. type(tbl) .. ')', 2)
-	return table.isfrozen(tbl)
+	return getmetatable(tbl) == readonly_meta
+end
+
+makereadonly = function(tbl)
+	assert(type(tbl) == 'table', "invalid argument #1 to 'makereadonly' (table expected, got " .. type(tbl) .. ')', 2)
+	return make_readonly(tbl)
+end
+
+setreadonly = function(tbl, readonly)
+	assert(type(tbl) == 'table', "invalid argument #1 to 'setreadonly' (table expected, got " .. type(tbl) .. ')', 2)
+	assert(type(readonly) == 'boolean', "invalid argument #2 to 'setreadonly' (boolean expected, got " .. type(readonly) .. ')', 2)
+	if readonly then
+		make_readonly(tbl)
+	else
+		setmetatable(tbl, nil)
+	end
+	return tbl
 end
 
 -- cache
@@ -2535,28 +2530,64 @@ end
 
 -- saveinstance
 local _saveinstance = nil
-saveinstance = function(options) -- docs: https://luau.github.io/UniversalSynSaveInstance/api/SynSaveInstance/
-    if typeof(options) == 'Instance' then
-    	options = {Object = options}
+local _saveinstanceLoading = false
+local synSaveInstanceUrl = "https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau"
+
+local function load_saveinstance()
+	if _saveinstance then
+		return _saveinstance
+	end
+	local source
+	pcall(function()
+		local ok, decoded = pcall(base64decode, send_method('getsynsaveinstance'))
+		if ok and type(decoded) == 'string' and #decoded > 0 then
+			source = decoded
+		end
+	end)
+	if not source then
+		pcall(function()
+			source = game:HttpGet(synSaveInstanceUrl, true)
+		end)
+	end
+	if not source or #source == 0 then
+		error("saveinstance: could not load SynSaveInstance", 2)
+	end
+	_saveinstance = loadstring(source, "saveinstance")()
+	return _saveinstance
+end
+
+local function saveinstance_warm()
+	if _saveinstance or _saveinstanceLoading then
+		return
+	end
+	_saveinstanceLoading = true
+	task.spawn(function()
+		pcall(load_saveinstance)
+		_saveinstanceLoading = false
+	end)
+end
+
+saveinstance = function(object, options) -- docs: https://luau.github.io/UniversalSynSaveInstance/api/SynSaveInstance/
+    if typeof(object) == 'table' and options == nil then
+    	options = object
+    	object = nil
+    end
+    if typeof(object) == 'Instance' then
+    	if type(options) ~= 'table' then
+    		options = {}
+    	end
+    	if options.Object == nil then
+    		options.Object = object
+    	end
+    elseif object ~= nil and typeof(object) ~= 'Instance' then
+    	error("invalid argument #1 to 'saveinstance' (Instance or table expected, got " .. typeof(object) .. ')', 2)
     end
     options = options or {}
     assert(type(options) == "table", "invalid argument #1 to 'saveinstance' (table expected, got " .. type(options) .. ") ", 2)
-    _saveinstance = _saveinstance or loadstring(game:HttpGet("https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau", true), "saveinstance")()
-    return _saveinstance(options)
+    local impl = load_saveinstance()
+    return impl(options)
 end
 savegame = saveinstance
-
-getcallbackvalue = function(inst, property)
-	assert(typeof(inst) == 'Instance', "invalid argument #1 to 'getcallbackvalue' (Instance expected, got " .. typeof(inst) .. ')', 2)
-	assert(type(property) == 'string', "invalid argument #2 to 'getcallbackvalue' (string expected, got " .. type(property) .. ')', 2)
-	local ok, value = pcall(function()
-		return inst[property]
-	end)
-	if ok and type(value) == 'function' then
-		return value
-	end
-	return nil
-end
 
 request = function(options)
 	assert(type(options) == 'table' and type(options.Url) == 'string', "invalid argument #1 to 'request' (table with Url expected, got " .. type(options) .. ')', 2)
@@ -2854,7 +2885,6 @@ get_comm_channel = function(id)
 end
 
 get_hidden_gui = gethui
-clonereference = cloneref
 
 -- main loop
 
@@ -2877,6 +2907,7 @@ task.spawn(function()
 end)
 
 pcall(flush_teleport_queue)
+pcall(saveinstance_warm)
 
 task.spawn(function()
 	while task.wait() do

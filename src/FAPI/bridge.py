@@ -16,6 +16,8 @@ from websocket import create_connection, WebSocketConnectionClosedException
 
 initReceivedEvent = Event()
 import os
+import tempfile
+import time
 from pathlib import Path, PureWindowsPath
 from shutil import rmtree
 
@@ -346,7 +348,57 @@ def decodeBytecode(bytecode: bytes) -> bytes:
     if version not in _seenBytecodeVersions:
         _seenBytecodeVersions.add(version)
         print(f'luau bytecode version: {version}')
+        if version not in (3, 4, 5, 6):
+            try:
+                dumpPath = os.path.join(
+                    tempfile.gettempdir(),
+                    f'FunnyExecutor-bytecode-v{version}-{time.time_ns()}.bin'
+                )
+                with open(dumpPath, 'wb') as dump:
+                    dump.write(raw)
+                print(f'to: {dumpPath}')
+                print(f'bytecode h: {raw[:48].hex()}')
+            except OSError:
+                pass
     return raw
+
+synSaveInstanceUrl = 'https://raw.githubusercontent.com/luau/SynSaveInstance/main/saveinstance.luau'
+synSaveInstanceCache = parent / 'cache' / 'saveinstance.luau'
+synSaveInstanceMaxAge = 7 * 24 * 3600
+_synSaveInstanceLock = Lock()
+
+def synSaveInstanceRead() -> bytes:
+    with _synSaveInstanceLock:
+        try:
+            if synSaveInstanceCache.is_file():
+                cached = synSaveInstanceCache.read_bytes()
+                if cached:
+                    return cached
+        except OSError:
+            pass
+        source = b''
+        try:
+            response = requests.get(synSaveInstanceUrl, timeout=25)
+            response.raise_for_status()
+            source = response.content
+        except requests.RequestException as e:
+            print(f'synsaveinstance fetch failed: {e}')
+        if not source:
+            return b''
+        try:
+            synSaveInstanceCache.parent.mkdir(parents=True, exist_ok=True)
+            synSaveInstanceCache.write_bytes(source)
+        except OSError:
+            pass
+        return source
+
+def synSaveInstancePrewarm():
+    try:
+        if synSaveInstanceCache.is_file() and time.time() - synSaveInstanceCache.stat().st_mtime < synSaveInstanceMaxAge:
+            return
+    except OSError:
+        pass
+    Thread(target=synSaveInstanceRead, daemon=True).start()
 
 def recvMethod(method, args):
     createWorkspace()
@@ -387,6 +439,12 @@ def recvMethod(method, args):
             return base64.b64encode(Luau.compile(source, chunkName))
         except subprocess.CalledProcessError as e:
             return b'fail\n' + (e.stderr or b'compile error').strip()
+
+    elif method == 'getsynsaveinstance':
+        source = synSaveInstanceRead()
+        if not source:
+            return b'fail'
+        return base64.b64encode(source)
 
     elif method == 'setfpscap':
         try:
@@ -902,6 +960,7 @@ def startBridge():
     Thread(target=httpd.serve_forever, daemon=True).start()
     cleanupCustomAssets()
     atexit.register(cleanupCustomAssets)
+    synSaveInstancePrewarm()
 
 def createWorkspace():
     if not (parent / 'workspace').is_dir():
