@@ -4,6 +4,9 @@ pydirectinput
 requests
 pyperclip
 psutil
-PySide6
 zstandard
 websocket-client
+pytauri-wheel==0.8.*
+pytauri==0.8.*
+pydantic
+anyio

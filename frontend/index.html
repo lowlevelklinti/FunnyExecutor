@@ -1,0 +1,2524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Angelic</title>
+<style>
+  :root {
+    --chrome: #131313;
+    --content: #000;
+    --rule: #757575;
+    --text: #ececec;
+    --muted: #909090;
+    --btn: #191919;
+    --btn-hover: #222;
+    --btn-active: #292929;
+    --border: #222;
+    --accent: #c8b48a;
+    --fs: 20px;
+    --lh: 26px;
+    --tab: 4;
+    --font: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  
+  [hidden] { display: none !important; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--chrome);
+    color: var(--text);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  button { font-family: inherit; }
+  
+  :focus-visible { outline: none; }
+  
+  ::selection { background: rgba(255, 255, 255, .22); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  
+  ::-webkit-scrollbar-thumb { background: #262626; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  
+  ::-webkit-scrollbar-thumb:hover { background: #333; background-clip: padding-box; border: 2px solid transparent; }
+  
+  ::-webkit-scrollbar-corner { background: transparent; }
+  
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .ico {
+    width: 16px; height: 16px;
+    fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    flex: none;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 50px minmax(0, 1fr);
+    grid-template-rows: 51px minmax(0, 1fr);
+    height: 100vh;
+    border: 1px solid var(--border);
+    animation: app-in .8s cubic-bezier(.22, .61, .36, 1) both;
+  }
+  @keyframes app-in { 0% { opacity: 0; transform: scale(.994); } 100% { opacity: 1; transform: none; } }
+
+  .sidebar {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 9px 0 10px;
+  }
+  
+  .logo {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--btn);
+    display: grid; place-items: center;
+    overflow: hidden;
+    flex: none;
+    pointer-events: none;
+  }
+  
+  .logo img { width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center;
+    margin-top: 18px;
+    flex: none;
+  }
+  
+  .nav-item.bottom { margin-top: auto; }
+
+  .nav-btn {
+    width: 30px; height: 30px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    background: var(--btn);
+    color: #cfcfcf;
+    display: grid; place-items: center;
+    overflow: hidden;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  
+  .nav-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  
+  .nav-btn:hover { background: var(--btn-hover); color: #fff; }
+  
+  .nav-btn.active { background: var(--btn-active); border-color: #333; color: #fff; }
+
+  .titlebar {
+    grid-column: 2; grid-row: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 6px 0 2px;
+  }
+  
+  .title {
+    font-size: 18px; font-weight: 500; letter-spacing: .1px;
+    color: #d2d2d2;
+    pointer-events: none;
+  }
+  .title-drag { flex: 1 1 auto; align-self: stretch; }
+  .win-controls { display: flex; gap: 1px; position: relative; z-index: 60; }
+  .win-btn {
+  
+    width: 40px; height: 34px;
+    border: 0; border-radius: 8px;
+    background: transparent; color: #dedede;
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: background .12s;
+  }
+  
+  .win-btn .ico { width: 15px; height: 15px; }
+  
+  .win-btn:hover { background: #1f1f1f; }
+  
+  .win-btn.close:hover { background: #c42b1c; color: #fff; }
+
+  .content {
+    grid-column: 2; grid-row: 2;
+    background: var(--content);
+    min-width: 0; min-height: 0;
+    overflow: hidden;
+  }
+  .page { display: none; height: 100%; }
+  .page.active { display: block; overflow: auto; }
+
+  #page-home.active {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 0 32px 40px;
+  }
+  .welcome h1 {
+    margin: 0 0 14px;
+    font-size: 32px; font-weight: 600; letter-spacing: -.4px;
+    color: #fff;
+    overflow-wrap: anywhere;
+  }
+  .welcome p { margin: 0; font-size: 18px; line-height: 1.5; color: var(--muted); }
+  .link {
+    background: none; border: 0; padding: 0;
+    font: inherit; color: #fff;
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 4px;
+    cursor: pointer;
+  }
+  .link:hover { color: #cfcfcf; }
+
+  #page-editor.active { display: flex; flex-direction: column; overflow: hidden; }
+  .editor-main {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    padding: 10px 6px 0 6px;
+  }
+
+  /* ---- editor tabs ---- */
+  .tabstrip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding-bottom: 6px;
+  }
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { height: 0; }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    max-width: 190px;
+    height: 30px;
+    padding: 0 8px 0 11px;
+    background: #0a0a0a;
+    border: 0;
+    border-radius: 9px;
+    color: var(--muted);
+    font: 500 13px var(--font);
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .tab:hover { background: #121212; color: #d0d0d0; }
+  .tab.active { background: #161616; color: #f0f0f0; }
+  .tab.drop { background: #1f1f1f; color: #fff; }
+  .tab .tab-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tab .tab-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #e8e8e8;
+    flex: none;
+  }
+  .tab:not(.dirty) .tab-dot { display: none; }
+  .tab-close {
+    width: 18px; height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #8f8f8f;
+    display: grid; place-items: center;
+    cursor: pointer;
+    flex: none;
+    transition: background .12s, color .12s;
+  }
+  .tab-close .ico { width: 11px; height: 11px; stroke-width: 2.4; }
+  .tab-close:hover { background: #2a2a2a; color: #fff; }
+  .tab-add {
+    width: 30px; height: 30px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: #0a0a0a;
+    color: var(--muted);
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .tab-add:hover { background: var(--btn-hover); color: #fff; }
+
+  /* ---- editor body + file explorer ---- */
+  .editor-body {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+  }
+  .explorer {
+    display: flex;
+    flex: none;
+    min-width: 0;
+    min-height: 0;
+  }
+  .explorer-pill {
+    width: 28px; height: 28px;
+    align-self: center;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #9b9b9b;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .explorer-pill .ico { width: 16px; height: 16px; stroke-width: 2.2; }
+  .explorer-pill:hover { background: #1c1c1c; color: #fff; }
+  .explorer-panel {
+    position: relative;
+    flex: none;
+    width: 246px;
+    min-width: 0;
+    display: flex;
+    background: #0b0b0b;
+    border: 0;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .explorer-grip {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+    display: grid;
+    place-items: center;
+    touch-action: none;
+  }
+  .explorer-grip .grip-line {
+    width: 3px;
+    height: 36px;
+    border-radius: 999px;
+    background: #333;
+    transition: background .15s, height .15s;
+  }
+  .explorer-grip:hover .grip-line { background: #6a6a6a; height: 52px; }
+  .explorer-grip.dragging .grip-line { background: #8f8f8f; }
+  .explorer-inner {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 10px 10px 16px;
+    gap: 9px;
+  }
+  .explorer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .explorer-title { font: 600 13px var(--font); color: #dcdcdc; }
+  .explorer-act {
+    width: 24px; height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #8f8f8f;
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .explorer-act .ico { width: 13px; height: 13px; }
+  .explorer-act:hover { background: #232323; color: #fff; }
+  .explorer-search {
+    width: 100%;
+    padding: 7px 11px;
+    background: #000;
+    color: #eee;
+    border: 1px solid #1f1f1f;
+    border-radius: 9px;
+    font: 12.5px var(--font);
+    outline: none;
+    user-select: text; -webkit-user-select: text;
+    transition: border-color .15s;
+  }
+  .explorer-search:focus { border-color: #4a4a4a; }
+  .explorer-search::placeholder { color: #5e5e5e; }
+  .explorer-tree {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .tree-folder { margin-bottom: 3px; }
+  .tree-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 4px 6px 6px;
+    border-radius: 8px;
+    background: #0f0f0f;
+    font: 700 10.5px var(--font);
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    color: #f2f2f2;
+    cursor: default;
+    transition: color .12s, background .12s;
+  }
+  .tree-caret {
+    width: 11px; height: 11px;
+    flex: none;
+    color: #a8a8a8;
+    transition: transform .15s ease;
+  }
+  .tree-folder.open > .tree-label > .tree-caret { transform: rotate(90deg); }
+  .tree-label > .ico { width: 13px; height: 13px; color: #f2f2f2; }
+  .tree-label span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tree-label:hover { color: #9c9c9c; background: #141414; }
+  .tree-label.drop, .tree-folder.drop > .tree-label { background: #1f1f1f; color: #6f6f6f; }
+  .tree-folder > .tree-folder {
+    margin-left: 10px;
+    padding-left: 8px;
+    border-left: 1px solid #1b1b1b;
+  }
+  .tree-del {
+    width: 20px; height: 20px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #5c5c5c;
+    display: grid; place-items: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: background .12s, color .12s, opacity .12s;
+  }
+  .tree-del .ico { width: 12px; height: 12px; }
+  .tree-row:hover .tree-del, .tree-label:hover .tree-del, .tree-del:focus-visible { opacity: 1; }
+  .tree-del:hover { background: #2a1212; color: #ff6b6b; }
+  .tree-label .tree-del { color: #8a3a3a; opacity: .55; }
+  .tree-label:hover .tree-del { opacity: 1; color: #ff6b6b; }
+  .tree-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border-radius: 8px;
+  }
+  .tree-row:hover { background: #141414; }
+  .tree-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px 6px 24px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #f0f0f0;
+    font: 13px var(--font);
+    text-align: left;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .tree-file .ico { width: 13px; height: 13px; color: #f0f0f0; flex: none; }
+  .tree-file span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tree-file:hover { color: #a4a4a4; background: #141414; }
+  .tree-file:hover .ico { color: #a4a4a4; }
+  .tree-file.active { color: #8d8d8d; background: #181818; }
+  .tree-file.active .ico { color: #8d8d8d; }
+  .explorer-foot {
+    display: flex;
+    gap: 8px;
+    padding-top: 2px;
+  }
+  .explorer-foot .tree-add {
+    flex: 1;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border: 0;
+    border-radius: 9px;
+    background: #131313;
+    color: #a8a8a8;
+    font: 600 12.5px var(--font);
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .explorer-foot .tree-add .ico { width: 14px; height: 14px; }
+  .explorer-foot .tree-add:hover { background: #1f1f1f; color: #fff; }
+  .tree-empty { padding: 14px 6px; font-size: 12.5px; color: #6a6a6a; }
+
+  /* app intro (same treatment as Madium) */
+  .loading-screen {
+    position: fixed; inset: 0; z-index: 1000;
+    display: grid; place-items: center;
+    background: var(--chrome);
+    opacity: 1;
+    transition: opacity .9s cubic-bezier(.4, 0, .2, 1);
+  }
+  .loading-screen.is-leaving { opacity: 0; pointer-events: none; }
+  .loading-screen.is-leaving .logo-stage { transform: scale(1.09); }
+  .loading-screen.is-leaving .logo-halo { animation: none; opacity: 0; transition: opacity .5s ease-out; }
+  .logo-stage {
+    position: relative;
+    display: grid; place-items: center;
+    transition: transform .7s cubic-bezier(.22, .61, .36, 1);
+  }
+  .logo-halo {
+    position: absolute;
+    width: 340px; height: 340px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(255, 255, 255, .17) 0%, rgba(255, 255, 255, .06) 38%, transparent 70%);
+    animation: halo-in 1.1s ease-out both, halo-breathe 3.6s ease-in-out 1.1s infinite;
+  }
+  .logo-mark { position: relative; animation: logo-in .7s cubic-bezier(.2, .8, .2, 1) both; }
+  .logo-mark img { width: 150px; height: 150px; object-fit: contain; filter: drop-shadow(0 0 15px rgba(255, 255, 255, .3)); }
+  @keyframes logo-in { 0% { opacity: 0; transform: scale(.88); } 100% { opacity: 1; transform: scale(1); } }
+  @keyframes halo-in { 0% { opacity: 0; transform: scale(.72); } 100% { opacity: 1; transform: scale(1); } }
+  @keyframes halo-breathe { 0%, 100% { opacity: .72; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
+
+  .editor-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 8px 6px 0;
+  }
+
+  .editor-actions .btn {
+    border: 0;
+  }
+
+  #editor { grid-row: 1; flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+  .editor-rule {
+    display: none;
+  }
+  .output-pane { display: none; }
+  .editor-msg {
+    position: absolute; inset: 0; display: grid; place-content: center; gap: 8px;
+    padding: 24px; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5;
+  }
+  .editor-msg b { color: #ddd; font-size: 15px; }
+  .editor-msg code { font-family: var(--mono); color: #cfcfcf; }
+
+  .monaco-editor .margin-view-overlays .line-numbers {
+    text-align: left !important;
+    font-family: var(--font) !important;
+    font-variant-numeric: tabular-nums;
+  }
+  .monaco-editor, .monaco-editor-background, .monaco-editor .margin { background-color: #000 !important; }
+
+  .page-pad { padding: 28px 32px 36px; }
+  .page-title { margin: 0 0 22px; font-size: 26px; font-weight: 600; letter-spacing: -.3px; color: #fff; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .card {
+    background: #0c0c0c;
+    border-radius: 14px;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .chip {
+    align-self: flex-start;
+    padding: 3px 9px;
+    background: #171717; border: 1px solid #232323;
+    border-radius: 4px;
+    color: #cfcfcf;
+    font: 600 12px var(--mono);
+  }
+  .card-body { height: 120px; border-radius: 9px; background: #050505; border: 1px solid #1b1b1b; }
+
+  .hub-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .hub-search {
+    flex: 1;
+    min-width: 180px;
+    padding: 9px 13px;
+    background: #0c0c0c;
+    color: #eee;
+    border: 0;
+    border-radius: 10px;
+    font: 13.5px var(--font);
+    outline: none;
+    user-select: text; -webkit-user-select: text;
+  }
+  .hub-search:focus { background: #121212; }
+  .hub-search::placeholder { color: #5e5e5e; }
+  .hub-status { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
+  .card { cursor: pointer; transition: background .15s; }
+  .card:hover { background: #131313; }
+  .card-body { background-size: cover; background-position: center; background-repeat: no-repeat; }
+  .card-title {
+    font: 600 13.5px var(--font);
+    color: #ececec;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-meta { display: flex; gap: 12px; font: 500 11.5px var(--mono); color: #7f7f7f; }
+  .card-meta b { color: #b9b9b9; font-weight: 600; }
+  .hub-more { display: flex; justify-content: center; margin-top: 22px; }
+  .hub-more .btn { border: 0; }
+
+  .settings-list { max-width: 640px; }
+  .owner-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    max-width: 760px;
+    margin-top: 6px;
+  }
+  .owner-card {
+    flex: 1 1 260px;
+    max-width: 340px;
+    background: #0c0c0c;
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    transition: background .15s;
+  }
+  .owner-card:hover { background: #111; }
+  .owner-shot {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #050505;
+    display: grid;
+    place-items: center;
+    margin-bottom: 10px;
+  }
+  .owner-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .owner-name { font: 600 15px var(--font); color: #f0f0f0; }
+  .owner-role { font: 500 12px var(--mono); color: #7d7d7d; }
+  .setting {
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 16px 18px;
+    background: #0c0c0c; border-radius: 14px;
+    margin-bottom: 10px;
+  }
+  .s-title { font-size: 15px; font-weight: 600; color: #f0f0f0; }
+  .s-desc { margin-top: 3px; font-size: 13px; color: var(--muted); }
+  .s-ctl { display: flex; align-items: center; gap: 12px; flex: none; }
+  .s-ctl output { min-width: 38px; text-align: right; font: 600 13px var(--mono); color: #cfcfcf; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 160px; height: 4px; border-radius: 999px;
+    background: #232323; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #f2f2f2; border: 0;
+  }
+  .seg { display: flex; padding: 2px; background: #131313; border: 1px solid #202020; border-radius: 10px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--muted);
+    font: 600 13px var(--font);
+    padding: 6px 13px; border-radius: 8px; cursor: pointer;
+  }
+  .seg button.on { background: #262626; color: #fff; }
+  .switch {
+    position: relative; width: 40px; height: 23px; padding: 0;
+    border: 0; border-radius: 999px; background: #232323;
+    cursor: pointer; transition: background .15s;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: #bdbdbd;
+    transition: transform .15s, background .15s;
+  }
+  .switch[aria-checked="true"] { background: #e8e8e8; }
+  .switch[aria-checked="true"]::after { transform: translateX(17px); background: #111; }
+
+  .btn {
+    border: 1px solid #252525;
+    background: #171717;
+    color: #eee;
+    font: 600 13.5px var(--font);
+    padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    transition: background .15s, opacity .15s;
+  }
+
+   #page-settings .btn {
+    border: 0;
+  }
+
+  .btn:hover { background: #1f1f1f; }
+  .btn.icon { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 9px; }
+  .btn.icon .ico { width: 15px; height: 15px; }
+  .btn.icon.primary .ico { fill: currentColor; stroke-width: 1.6; }
+  .btn.primary { background: #f1f1f1; border-color: #f1f1f1; color: #0a0a0a; }
+  .btn.primary:hover { background: #fff; }
+  .btn.danger { color: #ff9b91; }
+  .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, .5);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    backdrop-filter: blur(12px) saturate(120%);
+    animation: fade .18s ease-out;
+  }
+  .modal {
+    width: min(380px, calc(100vw - 32px));
+    padding: 26px 26px 22px;
+    background: #101010;
+    border: 1px;
+    border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .7);
+    animation: pop .2s cubic-bezier(.2, .9, .3, 1.1);
+  }
+  .modal h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; text-align: center; color: #fff; }
+  .modal .sub { margin: 0 0 22px; font-size: 14px; line-height: 1.45; text-align: center; color: var(--muted); }
+
+  .avatar-pick {
+    position: relative; display: grid; place-items: center;
+    width: 104px; height: 104px; margin: 0 auto 12px; padding: 0;
+    border-radius: 50%; overflow: hidden;
+    border: 1.5px dashed #3c3c3c; background: #161616; color: #8a8a8a;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .avatar-pick:hover { border-color: #6a6a6a; color: #d0d0d0; }
+  .avatar-pick.has-img { border-style: solid; border-color: #333; }
+  .avatar-pick img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .avatar-pick .ph .ico { width: 38px; height: 38px; stroke-width: 1.6; }
+  .avatar-pick .hover {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(0, 0, 0, .55); color: #fff;
+    font: 600 12px var(--font);
+    opacity: 0; transition: opacity .15s;
+  }
+  .avatar-pick:hover .hover, .avatar-pick:focus-visible .hover { opacity: 1; }
+
+  .pm-links { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; min-height: 34px; }
+  .pm-links .btn { padding: 6px 12px; font-size: 13px; }
+
+  .modal label { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 600; color: #d6d6d6; }
+  .modal input[type=text] {
+    width: 100%; padding: 11px 13px;
+    background: #080808; color: #fff;
+    border: 1px solid #2c2c2c; border-radius: 11px;
+    font: 15px var(--font); outline: none;
+    user-select: text; -webkit-user-select: text;
+    transition: border-color .15s;
+  }
+  .modal input[type=text]:focus { border-color: #6a6a6a; }
+  .modal input[type=text]::placeholder { color: #5e5e5e; }
+  .pm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+  .modal.first .pm-actions .btn { width: 100%; }
+
+  .modal .btn, .modal .btn.primary { border: 0; }
+  .modal .btn { background: #1c1c1c; }
+  .modal .btn:hover { background: #262626; }
+  .modal .btn.primary { background: #f1f1f1; }
+  .modal .btn.primary:hover { background: #fff; }
+  .modal input[type=text] { border: 0; background: #171717; }
+  .modal input[type=text]:focus { background: #222; }
+  .modal :focus-visible { outline: none; }
+  .modal .btn:focus-visible { background: #2c2c2c; }
+  .modal .btn.primary:focus-visible { background: #fff; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; z-index: 70;
+    transform: translate(-50%, 12px);
+    padding: 10px 16px;
+    background: #1c1c1c; border: 1px solid #333; border-radius: 999px;
+    font-size: 13.5px; font-weight: 500; color: #eee;
+    opacity: 0; pointer-events: none;
+    transition: opacity .18s, transform .18s;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.96) translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .overlay, .modal { animation: none; }
+    * { transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></symbol>
+  <symbol id="i-scroll-text" viewBox="0 0 24 24"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-user-round-pen" viewBox="0 0 24 24"><path d="M2 21a8 8 0 0 1 10.821-7.487"/><path d="M21.378 16.626a1 1 0 0 0-3.004-3.004l-4.01 4.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/><circle cx="10" cy="8" r="5"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+<symbol id="i-syringe" viewBox="0 0 24 24">
+<path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><line x1="12" x2="12" y1="10" y2="16"/><line x1="9" x2="15" y1="13" y2="13"/></symbol>
+</svg>
+
+  <div class="loading-screen" id="intro">
+    <div class="logo-stage">
+      <div class="logo-halo" aria-hidden="true"></div>
+      <div class="logo-mark"><img src="resources/funny.png" alt="Funny Executor"></div>
+    </div>
+  </div>
+
+  <div class="app">
+
+
+  <aside class="sidebar" data-tauri-drag-region>
+    <div class="logo"><img id="logoImg" src="resources/funny.png" alt="Funny Executor"></div>
+
+    <div class="nav-item">
+      <button class="nav-btn active" data-page="home" title="Home" aria-label="Home"><svg class="ico"><use href="#i-house"/></svg></button>
+    </div>
+    <div class="nav-item">
+      <button class="nav-btn" data-page="editor" title="Editor" aria-label="Editor"><svg class="ico"><use href="#i-square-terminal"/></svg></button>
+    </div>
+    <div class="nav-item">
+      <button class="nav-btn" data-page="community" title="Script Hub" aria-label="Script Hub"><svg class="ico"><use href="#i-scroll-text"/></svg></button>
+    </div>
+    <div class="nav-item">
+      <button class="nav-btn" data-page="settings" title="Settings" aria-label="Settings"><svg class="ico"><use href="#i-settings"/></svg></button>
+    </div>
+
+    <div class="nav-item">
+      <button class="nav-btn" data-page="credits" title="Credits" aria-label="Credits"><svg class="ico"><use href="#i-users"/></svg></button>
+    </div>
+
+    <div class="nav-item bottom">
+      <button class="nav-btn" id="profileBtn" title="Profile" aria-label="Profile"><img id="profileImg" alt="" hidden><svg class="ico" id="profileIcon"><use href="#i-user-round-pen"/></svg></button>
+    </div>
+  </aside>
+
+  <header class="titlebar" data-tauri-drag-region>
+    <span class="title" data-tauri-drag-region>Funny Executor</span>
+    <div class="title-drag" data-tauri-drag-region></div>
+    <div class="win-controls">
+      <button class="win-btn" id="btnMin" title="Minimize" aria-label="Minimize"><svg class="ico"><use href="#i-minus"/></svg></button>
+      <button class="win-btn" id="btnMax" title="Maximize" aria-label="Maximize"><svg class="ico"><use href="#i-square"/></svg></button>
+      <button class="win-btn close" id="btnClose" title="Close" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+  </header>
+
+  <main class="content">
+
+    <section class="page active" id="page-home">
+      <div class="welcome">
+        <h1>Welcome <span id="welcomeUser">User</span> to Funny Executor!</h1>
+        <p>To get started, <button class="link" id="goEditor" type="button">go to the editor</button> and create .lua and .luau files!</p>
+      </div>
+    </section>
+
+    <section class="page" id="page-editor">
+    <div class="editor-main">
+      <div class="tabstrip">
+        <div class="tabs" id="tabs" role="tablist" aria-label="Open scripts"></div>
+        <button class="tab-add" id="newTabBtn" type="button" title="New tab" aria-label="New tab"><svg class="ico"><use href="#i-plus"/></svg></button>
+      </div>
+
+      <div class="editor-body">
+        <div id="editor"></div>
+        <div class="editor-rule" id="editorRule"></div>
+        <div class="explorer">
+          <button class="explorer-pill" id="explorerPill" type="button" title="Hide files" aria-label="Toggle file explorer" aria-expanded="true"><svg class="ico"><use href="#i-chevron-left"/></svg></button>
+          <aside class="explorer-panel" id="explorerPanel">
+            <div class="explorer-grip" id="explorerGrip" title="Drag to resize"><span class="grip-line"></span></div>
+            <div class="explorer-inner">
+              <div class="explorer-head">
+                <span class="explorer-title">Files</span>
+                <button class="explorer-act" id="explorerRefresh" type="button" title="Refresh" aria-label="Refresh files"><svg class="ico"><use href="#i-refresh"/></svg></button>
+              </div>
+              <input class="explorer-search" id="explorerSearch" type="text" placeholder="Search files" autocomplete="off" spellcheck="false">
+              <div class="explorer-tree" id="explorerTree"></div>
+              <div class="explorer-foot">
+                <button class="tree-add icon" id="newFileBtn" type="button" title="New script" aria-label="New script"><svg class="ico"><use href="#i-plus"/></svg></button>
+                <button class="tree-add icon folder" id="newFolderBtn" type="button" title="New folder" aria-label="New folder"><svg class="ico"><use href="#i-folder-plus"/></svg></button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div class="editor-actions">
+      <button class="btn icon" id="injectBtn" type="button" title="Inject" aria-label="Inject"><svg class="ico"><use href="#i-syringe"/></svg></button>
+      <button class="btn icon primary" id="executeBtn" type="button" title="Execute" aria-label="Execute"><svg class="ico"><use href="#i-play"/></svg></button>
+    </div>
+
+    <div class="output-pane"></div>
+  </section>
+
+    <section class="page" id="page-community">
+      <div class="page-pad">
+        <h1 class="page-title">Script Hub</h1>
+        <div class="hub-bar">
+          <div class="seg" id="hubProviders" role="group" aria-label="Script provider"></div>
+          <input class="hub-search" id="hubSearch" type="text" placeholder="Search scripts" autocomplete="off" spellcheck="false">
+          <div class="seg" id="hubSorts" role="group" aria-label="Sort"></div>
+        </div>
+        <p class="hub-status" id="hubStatus"></p>
+        <div class="cards" id="cards"></div>
+        <div class="hub-more"><button class="btn" id="hubMore" type="button">Load more</button></div>
+      </div>
+    </section>
+
+    <section class="page" id="page-credits">
+      <div class="page-pad">
+        <h1 class="page-title">Owners of Funny Executor</h1>
+        <div class="owner-cards">
+          <article class="owner-card">
+            <div class="owner-shot"><img src="resources/theholytorch.png" alt="theholytorch"></div>
+            <div class="owner-name">theholytorch</div>
+            <div class="owner-role">Owner</div>
+          </article>
+          <article class="owner-card">
+            <div class="owner-shot"><img src="resources/funnyfreak228.png" alt="funnyfreak228_"></div>
+            <div class="owner-name">funnyfreak228_</div>
+            <div class="owner-role">Owner</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-settings">
+      <div class="page-pad">
+        <h1 class="page-title">Settings</h1>
+        <div class="settings-list">
+
+          <div class="setting">
+            <div>
+              <div class="s-title">Editor font size</div>
+              <div class="s-desc">Size of the code and line numbers in the editor.</div>
+            </div>
+            <div class="s-ctl">
+              <input type="range" id="setFont" min="12" max="28" step="1" aria-label="Editor font size">
+              <output id="setFontOut" for="setFont"></output>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div>
+              <div class="s-title">Tab size</div>
+              <div class="s-desc">How wide one level of indentation is.</div>
+            </div>
+            <div class="s-ctl">
+              <div class="seg" id="tabSeg" role="group" aria-label="Tab size">
+                <button type="button" data-size="2">2</button>
+                <button type="button" data-size="4">4</button>
+                <button type="button" data-size="8">8</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div>
+              <div class="s-title">Indent with spaces</div>
+              <div class="s-desc">Turn off to insert a tab character when you press Tab.</div>
+            </div>
+            <div class="s-ctl">
+              <button class="switch" id="setSpaces" type="button" role="switch" aria-checked="true" aria-label="Indent with spaces"></button>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div>
+              <div class="s-title">Minimap</div>
+              <div class="s-desc">Show a small overview of your code on the right side of the editor.</div>
+            </div>
+            <div class="s-ctl">
+              <button class="switch" id="setMinimap" type="button" role="switch" aria-checked="true" aria-label="Show minimap"></button>
+            </div>
+          </div>
+
+          <div class="setting">
+            <div>
+              <div class="s-title">Reset profile</div>
+              <div class="s-desc">Clears your username and picture, then runs first-time setup again.</div>
+            </div>
+            <div class="s-ctl">
+              <button class="btn danger" id="resetBtn" type="button">Reset</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="overlay" id="profileOverlay" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
+    <h2 id="pmTitle">Set up your profile</h2>
+    <p class="sub" id="pmSub">Choose a profile picture and a username to get started.</p>
+
+    <button class="avatar-pick" id="avatarPick" type="button" aria-label="Choose profile picture">
+      <img id="avatarImg" alt="" hidden>
+      <span class="ph" id="avatarPh"><svg class="ico"><use href="#i-user-round-pen"/></svg></span>
+      <span class="hover">Choose</span>
+    </button>
+    <div class="pm-links">
+      <button class="btn" id="pickBtn" type="button">Choose picture</button>
+      <button class="btn" id="removeBtn" type="button" hidden>Remove</button>
+    </div>
+
+    <label for="usernameInput">Username</label>
+    <input type="text" id="usernameInput" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Enter a username">
+
+    <div class="pm-actions">
+      <button class="btn" id="pmCancel" type="button">Cancel</button>
+      <button class="btn primary" id="pmSave" type="button" disabled>Continue</button>
+    </div>
+    <input type="file" id="avatarFile" accept="image/*" hidden>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="overlay" id="askOverlay" hidden>
+  <div class="modal" id="askModal" role="dialog" aria-modal="true" aria-labelledby="askTitle">
+    <h2 id="askTitle">Title</h2>
+    <p class="sub" id="askSub"></p>
+    <label for="askInput" id="askLabel" hidden>Name</label>
+    <input type="text" id="askInput" maxlength="64" autocomplete="off" spellcheck="false" hidden>
+    <div class="pm-actions">
+      <button class="btn" id="askCancel" type="button">Cancel</button>
+      <button class="btn primary" id="askOk" type="button">Create</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="openFallback" accept=".lua,.luau,.txt" hidden>
+
+<script>
+(() => {
+  'use strict';
+
+  const $  = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const T  = window.__TAURI__ || null;
+  const pyInvoke = (cmd, body) =>
+    T && T.pytauri ? T.pytauri.pyInvoke(cmd, body) : Promise.reject(new Error('backend unavailable'));
+
+  const logUi = text => { pyInvoke('log_message', { text: String(text) }).catch(() => {}); };
+  addEventListener('error', ev => logUi('ERROR ' + ev.message + ' @' + (ev.lineno || '?')));
+  addEventListener('unhandledrejection', ev => logUi('REJECT ' + ((ev.reason && ev.reason.message) || ev.reason)));
+
+  const Store = {
+    // persistence lives in the Python backend (%APPDATA%/FunnyExecutor)
+    async init() {},
+    async read(name) {
+      try { return await pyInvoke('read_store', { text: name }); }
+      catch (_) { return null; }
+    },
+    async write(name, text) {
+      try { await pyInvoke('write_store', { name, content: text }); } catch (_) {}
+    },
+    async remove(name) {
+      try { await pyInvoke('remove_store', { text: name }); } catch (_) {}
+    }
+  };
+
+  const DEFAULTS = { fontSize: 12, tabSize: 4, useSpaces: true, minimap: true };
+  let settings = { ...DEFAULTS };
+  let profile = null;           // { username, avatar }
+  let currentPage = 'home';
+  let hubProvider = 'scriptblox', hubSort = 'date', hubPage = 1, hubPages = 1;
+  let hubScripts = [], hubQuery = '', hubLoading = false;
+
+  $('#btnMin').addEventListener('click', () => { pyInvoke('window_control', { action: 'minimize' }).catch(() => {}); });
+  $('#btnMax').addEventListener('click', () => { pyInvoke('window_control', { action: 'toggleMaximize' }).catch(() => {}); });
+  $('#btnClose').addEventListener('click', () => { pyInvoke('window_control', { action: 'close' }).catch(() => {}); });
+
+  (() => {
+    const img = $('#logoImg');
+    let attempt = 0;
+    img.addEventListener('error', async () => {
+      attempt++;
+      if (attempt === 1 && T && T.path && T.path.resolveResource) {
+        try {
+          const p = await T.path.resolveResource('resources/funny.png');
+          const conv = (T.core && T.core.convertFileSrc) || (T.tauri && T.tauri.convertFileSrc);
+          if (conv) { img.src = conv(p); return; }
+        } catch (_) {}
+      }
+      img.style.visibility = 'hidden';
+    });
+  })();
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  const pages = {
+    home: $('#page-home'),
+    editor: $('#page-editor'),
+    community: $('#page-community'),
+    credits: $('#page-credits'),
+    settings: $('#page-settings')
+  };
+
+  function showPage(name) {
+    currentPage = name;
+    for (const [key, el] of Object.entries(pages)) el.classList.toggle('active', key === name);
+    $$('.nav-btn[data-page]').forEach(b => {
+      const on = b.dataset.page === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-current', on ? 'page' : 'false');
+    });
+    if (name === 'editor') {
+      requestAnimationFrame(() => { if (editor) { editor.layout(); editor.focus(); } });
+    }
+    if (name === 'community' && !hubScripts.length && !hubLoading) loadHub(true);
+  }
+
+  $$('.nav-btn[data-page]').forEach(b => b.addEventListener('click', () => showPage(b.dataset.page)));
+  $('#goEditor').addEventListener('click', () => showPage('editor'));
+
+  $('#injectBtn').addEventListener('click', async () => {
+    logUi('INJECT clicked');
+    console.log('[inject] clicked');
+    try {
+      const res = await pyInvoke('inject', {});
+      logUi('INJECT result ' + JSON.stringify(res));
+      console.log('[inject] result', res);
+      if (res && !res.ok && res.message) toast(res.message);
+    } catch (e) {
+      logUi('INJECT error ' + (e && e.message ? e.message : e));
+      console.error('[inject] error', e);
+    }
+  });
+  $('#executeBtn').addEventListener('click', async () => {
+    if (!editor) return;
+    try {
+      const res = await pyInvoke('execute_script', { script: getText() });
+      if (res && !res.ok && res.message) toast(res.message);
+    } catch (_) {}
+  });
+
+  function updateProfileUI() {
+    $('#welcomeUser').textContent = (profile && profile.username) || 'User';
+    const img = $('#profileImg'), icon = $('#profileIcon');
+    const has = !!(profile && profile.avatar);
+    if (has) img.src = profile.avatar;
+    img.hidden = !has;
+    icon.hidden = has;
+  }
+
+  /* ---- script hub (providers borrowed from Madium) ---- */
+  const PROVIDERS = [
+    { id: 'scriptblox', label: 'ScriptBlox', logo: 'resources/providers/scriptblox.svg', sorts: [] },
+    { id: 'rscripts', label: 'Rscripts', logo: 'resources/providers/rscripts.svg', sorts: [['Latest', 'date'], ['Views', 'views'], ['Likes', 'likes']] },
+    { id: 'haxhell', label: 'HaxHell', logo: 'resources/providers/haxhell.ico', sorts: [] },
+    { id: 'robloxscripts', label: 'RobloxScripts', logo: 'resources/providers/robloxscripts.png', sorts: [] }
+  ];
+  const SB = 'https://scriptblox.com';
+  const RS = 'https://rscripts.net/api/v2/scripts';
+  const HH = 'https://api.haxhell.com/api/v1/scripts';
+  const RBS = 'https://robloxscripts.com/api/v1/scripts';
+
+  const mapScriptblox = s => ({
+    id: 'scriptblox:' + s._id,
+    provider: 'scriptblox',
+    title: s.title || 'Untitled',
+    views: s.views || 0,
+    likes: 0,
+    game: s.game && s.game.name,
+    image: s.game && s.game.imageUrl ? (/^https?:/i.test(s.game.imageUrl) ? s.game.imageUrl : SB + s.game.imageUrl) : (s.image || null),
+    user: s.owner && s.owner.username,
+    content: s.script,
+    rawUrl: !s.script && s.slug ? `${SB}/raw/${s.slug}` : null
+  });
+  const mapRscripts = s => {
+    const raw = s.rawScript && /^https?:\/\//i.test(s.rawScript);
+    return {
+      id: 'rscripts:' + s._id,
+      provider: 'rscripts',
+      title: s.title || 'Untitled',
+      views: s.views || 0,
+      likes: s.likes || 0,
+      game: s.game && (s.game.name || s.game),
+      image: s.image || null,
+      user: s.user && (s.user.username || s.user),
+      content: raw ? undefined : (s.script || s.rawScript),
+      rawUrl: raw ? s.rawScript : null
+    };
+  };
+  const mapHaxhell = s => ({
+    id: 'haxhell:' + s.id,
+    provider: 'haxhell',
+    title: s.title || 'Untitled',
+    views: (s.stats && s.stats.views) || 0,
+    likes: (s.stats && s.stats.likes) || 0,
+    game: s.game && s.game.name,
+    image: (s.game && s.game.thumbnailUrl) || null,
+    user: s.author && s.author.username,
+    content: undefined,
+    rawUrl: (s.links && s.links.raw) || null
+  });
+  const mapRobloxScripts = s => ({
+    id: 'robloxscripts:' + s.id,
+    provider: 'robloxscripts',
+    title: s.title || 'Untitled',
+    views: s.views || 0,
+    likes: s.likes || 0,
+    game: s.game && s.game.name,
+    image: s.image || null,
+    user: s.author && s.author.username,
+    content: s.script || undefined,
+    rawUrl: s.script ? null : (s.rawScriptUrl || null)
+  });
+
+  function providerRequest() {
+    const q = (hubQuery || '').trim();
+    if (hubProvider === 'scriptblox') {
+      const url = q ? `${SB}/api/script/search?q=${encodeURIComponent(q)}&page=${hubPage}` : `${SB}/api/script/fetch?page=${hubPage}`;
+      return {
+        url,
+        map: data => {
+          const r = (data && data.result) || {};
+          return { list: (r.scripts || []).map(mapScriptblox), pages: r.totalPages || 1 };
+        }
+      };
+    }
+    if (hubProvider === 'rscripts') {
+      const p = new URLSearchParams({ page: String(hubPage), orderBy: hubSort, sort: 'desc' });
+      if (q) p.set('q', q);
+      return {
+        url: `${RS}?${p}`,
+        map: data => ({
+          list: ((data && data.scripts) || []).map(mapRscripts),
+          pages: (data && data.info && data.info.pages) || 1
+        })
+      };
+    }
+    if (hubProvider === 'haxhell') {
+      const p = new URLSearchParams({ page: String(hubPage) });
+      if (q) p.set('q', q);
+      return {
+        url: `${HH}?${p}`,
+        map: data => ({
+          list: ((data && data.data) || []).map(mapHaxhell),
+          pages: (data && data.pagination && data.pagination.pages) || 1
+        })
+      };
+    }
+    const p = new URLSearchParams({ page: String(hubPage) });
+    if (q) p.set('q', q);
+    return {
+      url: `${RBS}?${p}`,
+      map: data => ({
+        list: ((data && data.data) || []).map(mapRobloxScripts),
+        pages: (data && data.pagination && data.pagination.pages) || 1
+      })
+    };
+  }
+
+  async function hubText(url) {
+    const res = await pyInvoke('hub_fetch', { url });
+    if (!res || !res.ok) throw new Error((res && res.message) || 'request failed');
+    return res.text;
+  }
+
+  async function openHubScript(entry) {
+    let text = entry.content;
+    if (text === undefined || text === null || text === '') {
+      if (!entry.rawUrl) { toast('This script has no source'); return; }
+      $('#hubStatus').textContent = 'Fetching ' + entry.title + '...';
+      try { text = await hubText(entry.rawUrl); }
+      catch (err) { toast('Could not download the script'); $('#hubStatus').textContent = ''; return; }
+      $('#hubStatus').textContent = '';
+    }
+    if (!editor) { showPage('editor'); return; }
+    openTab(uniqueHubName(entry.title + '.luau'), text, null);
+    showPage('editor');
+    toast('Loaded ' + entry.title);
+  }
+  const uniqueHubName = name => {
+    const clean = name.replace(/[\\/:*?"<>|]/g, '_');
+    if (!tabs.some(t => t.name === clean)) return clean;
+    const dot = clean.lastIndexOf('.');
+    const stem = dot > 0 ? clean.slice(0, dot) : clean;
+    const ext = dot > 0 ? clean.slice(dot) : '';
+    let i = 2;
+    while (tabs.some(t => t.name === `${stem} ${i}${ext}`)) i++;
+    return `${stem} ${i}${ext}`;
+  };
+
+  const fmt = n => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0));
+
+  function renderHub() {
+    const cards = $('#cards');
+    if (!hubScripts.length) { cards.innerHTML = ''; return; }
+    cards.innerHTML = hubScripts.map(s =>
+      '<article class="card" data-id="' + escapeHtml(s.id) + '" title="' + escapeHtml(s.title) + '">' +
+      '<span class="chip">' + escapeHtml(s.provider) + '</span>' +
+      '<div class="card-body" style="background-image:url(&quot;' + escapeHtml(s.image || '') + '&quot;)"></div>' +
+      '<div class="card-title">' + escapeHtml(s.title) + '</div>' +
+      '<div class="card-meta"><span><b>' + fmt(s.views) + '</b> views</span><span><b>' + fmt(s.likes) + '</b> likes</span>' +
+      (s.user ? '<span>@' + escapeHtml(String(s.user)) + '</span>' : '') + '</div>' +
+      '</article>'
+    ).join('');
+  }
+
+  async function loadHub(reset) {
+    if (hubLoading) return;
+    hubLoading = true;
+    if (reset) { hubPage = 1; hubScripts = []; renderHub(); }
+    $('#hubMore').disabled = true;
+    $('#hubStatus').textContent = 'Loading scripts...';
+    try {
+      const req = providerRequest();
+      const data = JSON.parse(await hubText(req.url));
+      const { list, pages } = req.map(data);
+      hubPages = pages;
+      hubScripts = hubScripts.concat(list);
+      renderHub();
+      $('#hubStatus').textContent = hubScripts.length
+        ? hubScripts.length + ' script' + (hubScripts.length === 1 ? '' : 's') + ' from ' + providerLabel(hubProvider) +
+          ' - page ' + hubPage + ' of ' + hubPages
+        : 'No scripts found.';
+    } catch (err) {
+      console.error(err);
+      $('#hubStatus').textContent = 'Could not load scripts: ' + (err.message || err);
+    } finally {
+      hubLoading = false;
+      $('#hubMore').disabled = false;
+      $('#hubMore').hidden = hubPage >= hubPages;
+    }
+  }
+
+  const providerLabel = id => (PROVIDERS.find(p => p.id === id) || {}).label || id;
+
+  function initHub() {
+    const seg = $('#hubProviders');
+    seg.innerHTML = PROVIDERS.map(p =>
+      '<button type="button" data-provider="' + p.id + '">' + escapeHtml(p.label) + '</button>'
+    ).join('');
+    seg.addEventListener('click', ev => {
+      const b = ev.target.closest('button[data-provider]');
+      if (!b || b.classList.contains('on')) return;
+      hubProvider = b.dataset.provider;
+      for (const x of $$('button', seg)) x.classList.toggle('on', x === b);
+      renderSorts();
+      loadHub(true);
+    });
+    $$('button', seg)[0].classList.add('on');
+
+    const sorts = $('#hubSorts');
+    const renderSorts = () => {
+      const p = PROVIDERS.find(x => x.id === hubProvider);
+      sorts.innerHTML = (p && p.sorts || []).map(([label, value]) =>
+        '<button type="button" data-sort="' + value + '">' + escapeHtml(label) + '</button>'
+      ).join('');
+      sorts.hidden = !(p && p.sorts && p.sorts.length);
+      $$('button', sorts).forEach(b => b.classList.toggle('on', b.dataset.sort === hubSort));
+    };
+    sorts.addEventListener('click', ev => {
+      const b = ev.target.closest('button[data-sort]');
+      if (!b) return;
+      hubSort = b.dataset.sort;
+      $$('button', sorts).forEach(x => x.classList.toggle('on', x === b));
+      loadHub(true);
+    });
+    renderSorts();
+
+    let searchTimer;
+    $('#hubSearch').addEventListener('input', ev => {
+      hubQuery = ev.target.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => loadHub(true), 450);
+    });
+
+    $('#hubMore').addEventListener('click', () => { hubPage++; loadHub(false); });
+
+    $('#cards').addEventListener('click', ev => {
+      const card = ev.target.closest('.card');
+      if (!card) return;
+      const entry = hubScripts.find(s => s.id === card.dataset.id);
+      if (entry) openHubScript(entry);
+    });
+  }
+
+  const editorEl = $('#editor');
+  const editorRule = $('#editorRule');
+  const MONO = '"Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, Menlo, monospace';
+  const MONACO_LOCAL = 'vendor/monaco/vs';
+  const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs';
+  let monaco = null, editor = null;
+  const dirtyModels = new WeakSet();
+  let tabs = [];
+  let activeTabId = null;
+  let tabSeq = 0;
+  let tabSig = '';
+  let tabSaveTimer;
+
+  const lineHeightFor = fs => Math.round(fs * 1.3);
+  const langForName = n => /\.lua$/i.test(n || '') ? 'lua' : 'luau';
+  const currentLang = () => editor ? editor.getModel().getLanguageId() : 'luau';
+  const getText = () => editor ? editor.getValue() : '';
+  const setLang = lang => { if (editor) monaco.editor.setModelLanguage(editor.getModel(), lang); };
+
+  /* ---- editor tabs ---- */
+  const tabsEl = $('#tabs');
+  const activeTab = () => tabs.find(t => t.id === activeTabId) || null;
+  const uniqueName = base => {
+    const names = new Set(tabs.map(t => t.name));
+    if (!names.has(base)) return base;
+    const dot = base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    let i = 2;
+    while (names.has(`${stem} ${i}${ext}`)) i++;
+    return `${stem} ${i}${ext}`;
+  };
+
+  function openTab(name, text, path, opts) {
+    const o = opts || {};
+    if (path) {
+      const hit = tabs.find(t => t.path === path);
+      if (hit) { setActiveTab(hit.id); return hit; }
+    }
+    const body = text || '';
+    const model = monaco.editor.createModel(body, langForName(name));
+    const tab = { id: ++tabSeq, name: name || 'Script', path: path || null, saved: body, model, external: !!o.external };
+    tabs.push(tab);
+    renderTabs();
+    setActiveTab(tab.id);
+    return tab;
+  }
+
+  function setActiveTab(id) {
+    const tab = tabs.find(t => t.id === id);
+    if (!tab || !editor) return;
+    activeTabId = id;
+    editor.setModel(tab.model);
+    renderTabs();
+    markActiveFile();
+    persistTabs();
+  }
+
+  function closeTab(id) {
+    const i = tabs.findIndex(t => t.id === id);
+    if (i < 0) return;
+    const wasActive = tabs[i].id === activeTabId;
+    try { tabs[i].model.dispose(); } catch (_) {}
+    tabs.splice(i, 1);
+    if (!tabs.length) { openTab('Script 1', '', null); return; }
+    if (wasActive) setActiveTab(tabs[Math.min(i, tabs.length - 1)].id);
+    else renderTabs();
+    persistTabs();
+  }
+
+  function renderTabs() {
+    if (!tabsEl) return;
+    const sig = tabs.map(t => `${t.id}|${t.id === activeTabId ? 1 : 0}|${t.model.getValue() !== t.saved ? 1 : 0}`).join(',');
+    if (sig === tabSig) return;
+    tabSig = sig;
+    tabsEl.innerHTML = '';
+    for (const t of tabs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tab' + (t.id === activeTabId ? ' active' : '');
+      b.setAttribute('role', 'tab');
+      b.dataset.id = String(t.id);
+      b.title = t.path || t.name;
+
+      const dot = document.createElement('span');
+      dot.className = 'tab-dot';
+      const label = document.createElement('span');
+      label.className = 'tab-name';
+      label.textContent = t.name;
+      const x = document.createElement('span');
+      x.className = 'tab-close';
+      x.title = 'Close';
+      x.innerHTML = '<svg class="ico"><use href="#i-x"/></svg>';
+      x.addEventListener('click', ev => { ev.stopPropagation(); closeTab(t.id); });
+
+      b.append(dot, label, x);
+      b.addEventListener('click', () => setActiveTab(t.id));
+      b.addEventListener('auxclick', ev => { if (ev.button === 1) { ev.preventDefault(); closeTab(t.id); } });
+      tabsEl.appendChild(b);
+    }
+    const active = tabsEl.querySelector('.tab.active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  function persistTabs() {
+    clearTimeout(tabSaveTimer);
+    tabSaveTimer = setTimeout(() => {
+      const payload = {
+        active: Math.max(0, tabs.findIndex(t => t.id === activeTabId)),
+        tabs: tabs.map(t => ({ name: t.name, path: t.path, external: !!t.external, text: t.model.getValue() }))
+      };
+      Store.write('tabs.json', JSON.stringify(payload));
+    }, 400);
+  }
+
+  async function restoreTabs() {
+    let saved = null;
+    try { saved = JSON.parse((await Store.read('tabs.json')) || 'null'); } catch (_) { saved = null; }
+
+    let list, activeIndex;
+    if (saved && Array.isArray(saved.tabs)) {
+      list = saved.tabs;
+      activeIndex = Number(saved.active) || 0;
+    } else if (Array.isArray(saved)) {
+      // one-time migration of the old desktop tabs.json ([active, [name, text], ...])
+      activeIndex = Number(saved[0]) || 0;
+      list = saved.slice(1)
+        .filter(e => Array.isArray(e) && typeof e[0] === 'string')
+        .map(e => ({ name: e[0], text: typeof e[1] === 'string' ? e[1] : '' }));
+    } else {
+      list = [];
+    }
+
+    for (const t of list) {
+      if (!t || typeof t.text !== 'string') continue;
+      let text = t.text;
+      // a tab bound to a real file always takes the current file content
+      if (t.path && !t.external) {
+        const disk = await readScript(t.path);
+        if (disk && disk.ok) text = disk.content || '';
+      }
+      openTab(t.name || 'Script', text, t.path || null, { external: !!t.external });
+    }
+    if (!tabs.length) { openTab('Script 1', '', null); return; }
+    const wanted = list[activeIndex];
+    const idx = wanted ? tabs.findIndex(t => t.path ? t.path === wanted.path : t.name === wanted.name) : -1;
+    setActiveTab(idx >= 0 ? tabs[idx].id : tabs[0].id);
+  }
+
+  /* keep every file-backed tab on disk when the window goes away */
+  function flushOnExit() {
+    clearTimeout(tabSaveTimer);
+    for (const t of tabs) {
+      if (!t.path || t.external) continue;
+      const text = t.model.getValue();
+      if (text === t.saved) continue;
+      t.saved = text;
+      pyInvoke('write_script', { path: t.path, content: text });
+    }
+    const payload = {
+      active: Math.max(0, tabs.findIndex(t => t.id === activeTabId)),
+      tabs: tabs.map(t => ({ name: t.name, path: t.path, external: !!t.external, text: t.model.getValue() }))
+    };
+    Store.write('tabs.json', JSON.stringify(payload));
+  }
+  addEventListener('beforeunload', flushOnExit);
+  addEventListener('pagehide', flushOnExit);
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => { s.remove(); reject(new Error('Could not load ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function loadMonaco() {
+    for (const base of [MONACO_LOCAL, MONACO_CDN]) {
+      try {
+        await loadScript(base + '/loader.js');
+        const abs = new URL(base, document.baseURI).href.replace(/\/$/, '');
+        const root = abs.replace(/\/vs$/, '/');
+        window.require.config({ paths: { vs: abs } });
+        window.MonacoEnvironment = {
+          getWorkerUrl: () => URL.createObjectURL(new Blob(
+            [`self.MonacoEnvironment={baseUrl:'${root}'};importScripts('${abs}/base/worker/workerMain.js');`],
+            { type: 'text/javascript' }))
+        };
+        await new Promise((res, rej) => window.require(['vs/editor/editor.main'], res, rej));
+        return window.monaco;
+      } catch (err) {
+        console.warn('[FunnyExecutor] Monaco failed from', base, err);
+      }
+    }
+    throw new Error('Monaco could not be loaded');
+  }
+  const monacoReady = loadMonaco();
+  monacoReady.catch(() => {});
+
+  const LUAU_KEYWORDS = ['and', 'break', 'continue', 'do', 'else', 'elseif', 'end', 'export', 'for', 'function',
+    'if', 'in', 'local', 'not', 'or', 'repeat', 'return', 'then', 'type', 'typeof', 'until', 'while'];
+  const LUAU_BUILTINS = ['print', 'warn', 'error', 'assert', 'pairs', 'ipairs', 'next', 'select', 'tostring',
+    'tonumber', 'require', 'pcall', 'xpcall', 'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal',
+    'rawlen', 'unpack', 'math', 'string', 'table', 'os', 'coroutine', 'bit32', 'utf8', 'debug', 'buffer'];
+  const SNIPPETS = [
+    ['function', 'function ${1:name}(${2})\n\t$0\nend'],
+    ['local function', 'local function ${1:name}(${2})\n\t$0\nend'],
+    ['if', 'if ${1:condition} then\n\t$0\nend'],
+    ['if else', 'if ${1:condition} then\n\t$2\nelse\n\t$0\nend'],
+    ['for i', 'for ${1:i} = ${2:1}, ${3:10} do\n\t$0\nend'],
+    ['for in pairs', 'for ${1:key}, ${2:value} in pairs(${3:tbl}) do\n\t$0\nend'],
+    ['for in ipairs', 'for ${1:i}, ${2:value} in ipairs(${3:tbl}) do\n\t$0\nend'],
+    ['while', 'while ${1:condition} do\n\t$0\nend'],
+    ['repeat', 'repeat\n\t$0\nuntil ${1:condition}'],
+    ['pcall', 'local ok, err = pcall(function()\n\t$0\nend)']
+  ];
+
+  function registerLanguages(m) {
+    const pairs = [{ open: '{', close: '}' }, { open: '[', close: ']' }, { open: '(', close: ')' }];
+    const config = {
+      comments: { lineComment: '--', blockComment: ['--[[', ']]'] },
+      brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+      autoClosingPairs: [...pairs,
+        { open: '"', close: '"', notIn: ['string'] },
+        { open: "'", close: "'", notIn: ['string', 'comment'] },
+        { open: '`', close: '`', notIn: ['string'] }],
+      surroundingPairs: [...pairs, { open: '"', close: '"' }, { open: "'", close: "'" }, { open: '`', close: '`' }],
+      indentationRules: {
+        increaseIndentPattern: /^\s*(?:(?:if|elseif)\b.*\bthen|(?:for|while)\b.*\bdo|else|repeat|do|(?:local\s+)?function\b.*\)|.*\bfunction\s*\(.*\))\s*$|.*[{(\[]\s*$/,
+        decreaseIndentPattern: /^\s*(?:end|else|elseif|until|[}\)\]])/
+      }
+    };
+
+    m.languages.register({ id: 'luau', extensions: ['.luau'], aliases: ['Luau', 'luau'] });
+    m.languages.setLanguageConfiguration('luau', config);
+    m.languages.setLanguageConfiguration('lua', config);
+    m.languages.setMonarchTokensProvider('luau', {
+      defaultToken: '',
+      keywords: LUAU_KEYWORDS,
+      constants: ['true', 'false', 'nil'],
+      builtins: LUAU_BUILTINS,
+      brackets: [
+        { open: '{', close: '}', token: 'delimiter.curly' },
+        { open: '[', close: ']', token: 'delimiter.square' },
+        { open: '(', close: ')', token: 'delimiter.parenthesis' }
+      ],
+      tokenizer: {
+        root: [
+          [/--\[(=*)\[/, 'comment', '@blockcomment.$1'],
+          [/--.*$/, 'comment'],
+          [/\[(=*)\[/, 'string', '@longstring.$1'],
+          [/"(?:[^"\\]|\\.)*$/, 'string.invalid'],
+          [/'(?:[^'\\]|\\.)*$/, 'string.invalid'],
+          [/"/, 'string', '@dq'],
+          [/'/, 'string', '@sq'],
+          [/`/, 'string', '@interp'],
+          [/0[xX][0-9a-fA-F_]+/, 'number.hex'],
+          [/0[bB][01_]+/, 'number.binary'],
+          [/\d[\d_]*(?:\.[\d_]*)?(?:[eE][\-+]?\d+)?/, 'number'],
+          [/\.\d[\d_]*(?:[eE][\-+]?\d+)?/, 'number'],
+          [/[a-zA-Z_]\w*/, { cases: { '@keywords': 'keyword', '@constants': 'constant', '@builtins': 'predefined', '@default': 'identifier' } }],
+          [/[{}()\[\]]/, '@brackets'],
+          [/[+\-*\/%^#=<>~.:,;&|?@]+/, 'operator']
+        ],
+        blockcomment: [
+          [/[^\]]+/, 'comment'],
+          [/\](=*)\]/, { cases: { '$1==$S2': { token: 'comment', next: '@pop' }, '@default': 'comment' } }],
+          [/./, 'comment']
+        ],
+        longstring: [
+          [/[^\]]+/, 'string'],
+          [/\](=*)\]/, { cases: { '$1==$S2': { token: 'string', next: '@pop' }, '@default': 'string' } }],
+          [/./, 'string']
+        ],
+        dq: [[/[^\\"]+/, 'string'], [/\\z\s*/, 'string.escape'], [/\\./, 'string.escape'], [/"/, 'string', '@pop']],
+        sq: [[/[^\\']+/, 'string'], [/\\z\s*/, 'string.escape'], [/\\./, 'string.escape'], [/'/, 'string', '@pop']],
+        interp: [
+          [/[^\\`{]+/, 'string'],
+          [/\\./, 'string.escape'],
+          [/\{/, { token: 'delimiter.curly', next: '@interpexpr' }],
+          [/`/, 'string', '@pop']
+        ],
+        interpexpr: [
+          [/\}/, { token: 'delimiter.curly', next: '@pop' }],
+          { include: '@root' }
+        ]
+      }
+    });
+
+    for (const id of ['lua', 'luau']) {
+      m.languages.registerCompletionItemProvider(id, {
+        provideCompletionItems(model, position) {
+          const w = model.getWordUntilPosition(position);
+          const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn };
+          const K = m.languages.CompletionItemKind;
+          return {
+            suggestions: [
+              ...LUAU_KEYWORDS.map(k => ({ label: k, kind: K.Keyword, insertText: k, range })),
+              ...LUAU_BUILTINS.map(k => ({ label: k, kind: K.Function, insertText: k, range })),
+              ...SNIPPETS.map(([label, body]) => ({
+                label, kind: K.Snippet, insertText: body, range,
+                insertTextRules: m.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              }))
+            ]
+          };
+        }
+      });
+    }
+  }
+
+  function defineTheme(m) {
+    m.editor.defineTheme('angelic', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
+        { token: 'keyword', foreground: 'c792ea' },
+        { token: 'string', foreground: 'a5d6a7' },
+        { token: 'string.invalid', foreground: 'ff8a80' },
+        { token: 'string.escape', foreground: '89ddff' },
+        { token: 'number', foreground: 'f5a97f' },
+        { token: 'constant', foreground: 'f78c6c' },
+        { token: 'predefined', foreground: '82aaff' },
+        { token: 'identifier', foreground: 'e6e6e6' },
+        { token: 'operator', foreground: 'c8c8c8' },
+        { token: 'delimiter', foreground: 'c8c8c8' }
+      ],
+      colors: {
+        'editor.background': '#000000',
+        'editor.foreground': '#e6e6e6',
+        'editorGutter.background': '#000000',
+        'editorLineNumber.foreground': '#9a9a9a',
+        'editorLineNumber.activeForeground': '#ffffff',
+        'editor.lineHighlightBackground': '#0c0c0c',
+        'editor.lineHighlightBorder': '#00000000',
+        'editor.selectionBackground': '#ffffff30',
+        'editor.inactiveSelectionBackground': '#ffffff18',
+        'editorCursor.foreground': '#ffffff',
+        'editorIndentGuide.background1': '#1c1c1c',
+        'editorIndentGuide.activeBackground1': '#3a3a3a',
+        'editorIndentGuide.background': '#1c1c1c',
+        'editorIndentGuide.activeBackground': '#3a3a3a',
+        'minimap.background': '#000000',
+        'minimapSlider.background': '#ffffff12',
+        'minimapSlider.hoverBackground': '#ffffff20',
+        'minimapSlider.activeBackground': '#ffffff2c',
+        'scrollbarSlider.background': '#ffffff1a',
+        'scrollbarSlider.hoverBackground': '#ffffff2e',
+        'scrollbarSlider.activeBackground': '#ffffff40',
+        'editorWidget.background': '#111111',
+        'editorWidget.border': '#2a2a2a',
+        'editorSuggestWidget.background': '#111111',
+        'editorSuggestWidget.border': '#2a2a2a',
+        'editorSuggestWidget.selectedBackground': '#222222',
+        'editorHoverWidget.background': '#111111',
+        'editorHoverWidget.border': '#2a2a2a'
+      }
+    });
+  }
+
+  function syncRule() {
+    if (editor) editorRule.style.marginLeft = editor.getLayoutInfo().contentLeft + 'px';
+  }
+
+  function applyEditorSettings() {
+    if (!editor) return;
+    editor.updateOptions({
+      fontSize: settings.fontSize,
+      lineHeight: lineHeightFor(settings.fontSize),
+      minimap: { enabled: settings.minimap, side: 'right' }
+    });
+    editor.getModel().updateOptions({ tabSize: settings.tabSize, insertSpaces: settings.useSpaces });
+    syncRule();
+  }
+
+  async function initEditor() {
+    try {
+      monaco = await monacoReady;
+    } catch (err) {
+      console.error(err);
+      editorEl.innerHTML = '<div class="editor-msg"><b>The code editor could not be loaded</b>' +
+        '<span>Copy <code>node_modules/monaco-editor/min/vs</code> into <code>vendor/monaco/vs</code> next to this file, ' +
+        'or connect to the internet so it can load from the CDN.</span></div>';
+      return;
+    }
+    registerLanguages(monaco);
+    defineTheme(monaco);
+
+    editor = monaco.editor.create(editorEl, {
+      value: '',
+      language: 'luau',
+      theme: 'angelic',
+      automaticLayout: true,
+      fontFamily: MONO,
+      fontSize: settings.fontSize,
+      lineHeight: lineHeightFor(settings.fontSize),
+      fontLigatures: false,
+      lineNumbers: n => n + '.',
+      lineNumbersMinChars: 2,
+      lineDecorationsWidth: 8,
+      glyphMargin: false,
+      folding: false,
+      renderLineHighlight: 'line',
+      minimap: { enabled: settings.minimap, side: 'right', showSlider: 'mouseover' },
+      scrollBeyondLastLine: false,
+      overviewRulerLanes: 0,
+      overviewRulerBorder: false,
+      hideCursorInOverviewRuler: true,
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
+      tabSize: settings.tabSize,
+      insertSpaces: settings.useSpaces,
+      detectIndentation: false,
+      autoIndent: 'full',
+      bracketPairColorization: { enabled: true },
+      guides: { indentation: true, bracketPairs: false },
+      matchBrackets: 'always',
+      cursorBlinking: 'smooth',
+      smoothScrolling: true,
+      fixedOverflowWidgets: true,
+      wordWrap: 'off',
+      padding: { top: 0, bottom: 0 }
+    });
+
+    editor.onDidLayoutChange(syncRule);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile(false));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS, () => saveFile(true));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => openFile());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => openTab(uniqueName('Script 1'), '', null));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () => { if (activeTabId !== null) closeTab(activeTabId); });
+    editor.onDidChangeModelContent(() => {
+      const model = editor.getModel();
+      if (model) dirtyModels.add(model);
+      renderTabs();
+      persistTabs();
+    });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => monaco.editor.remeasureFonts());
+
+    applyEditorSettings();
+    await restoreTabs();
+    if (currentPage === 'editor') editor.focus();
+  }
+
+  const SAVE_TYPES = [
+    { description: 'Luau script', accept: { 'text/plain': ['.luau'] } },
+    { description: 'Lua script',  accept: { 'text/plain': ['.lua'] } }
+  ];
+
+  async function saveFile(saveAs) {
+    const tab = activeTab();
+    if (!tab || !editor) return;
+    const text = getText();
+
+    if (!saveAs && tab.path && !tab.external) {
+      try {
+        const res = await pyInvoke('write_script', { path: tab.path, content: text });
+        if (!res || !res.ok) { toast((res && res.message) || 'Could not save the file'); return; }
+        tab.saved = text;
+        dirtyModels.delete(tab.model);
+        renderTabs();
+        toast('Saved ' + tab.name);
+        return;
+      } catch (err) {
+        console.error(err);
+        toast('Could not save the file');
+        return;
+      }
+    }
+
+    const suggested = tab.name || (currentLang() === 'lua' ? 'script.lua' : 'script.luau');
+    try {
+      const res = await pyInvoke('save_file_dialog', {
+        default_name: suggested,
+        content: text,
+        title: saveAs ? 'Save As' : 'Save File'
+      });
+      if (!res || res.canceled) return;
+      tab.name = res.name;
+      tab.path = res.path;
+      tab.external = true;
+      tab.saved = text;
+      dirtyModels.delete(tab.model);
+      setLang(langForName(tab.name));
+      renderTabs();
+      persistTabs();
+      toast('Saved ' + tab.name);
+    } catch (err) {
+      console.error(err);
+      toast('Could not save the file');
+    }
+  }
+
+  function loadText(text, name, path) {
+    openTab(name, text, path || null, { external: !!path });
+    toast('Opened ' + name);
+  }
+
+  async function openFile() {
+    if (!editor) return;
+    try {
+      const res = await pyInvoke('open_file_dialog', {});
+      if (!res || res.canceled) return;
+      openTab(res.name, res.content || '', res.path, { external: true });
+      toast('Opened ' + res.name);
+    } catch (err) {
+      console.error(err);
+      toast('Could not open the file');
+    }
+  }
+
+  /* ---- file explorer ---- */
+  const pill = $('#explorerPill');
+  const panel = $('#explorerPanel');
+  const grip = $('#explorerGrip');
+  const treeEl = $('#explorerTree');
+  const searchEl = $('#explorerSearch');
+  let explorerOpen = true;
+  let explorerWidth = 246;
+  let scriptTree = { folders: [] };
+
+  const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function setExplorerOpen(open) {
+    explorerOpen = !!open;
+    panel.style.display = explorerOpen ? '' : 'none';
+    const use = pill.querySelector('use');
+    if (use) use.setAttribute('href', explorerOpen ? '#i-chevron-left' : '#i-chevron-right');
+    pill.setAttribute('aria-expanded', String(explorerOpen));
+    pill.title = explorerOpen ? 'Hide files' : 'Show files';
+    if (explorerOpen) requestAnimationFrame(() => { if (editor) editor.layout(); });
+    persistExplorer();
+  }
+  pill.addEventListener('click', () => setExplorerOpen(!explorerOpen));
+
+  const setExplorerWidth = w => {
+    explorerWidth = Math.max(200, Math.min(520, Math.round(w)));
+    panel.style.width = explorerWidth + 'px';
+  };
+
+  grip.addEventListener('pointerdown', ev => {
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startWidth = explorerWidth;
+    grip.classList.add('dragging');
+    try { grip.setPointerCapture(ev.pointerId); } catch (_) {}
+    const move = e => setExplorerWidth(startWidth - (e.clientX - startX));
+    const up = () => {
+      grip.classList.remove('dragging');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      persistExplorer();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
+
+  function persistExplorer() {
+    Store.write('explorer.json', JSON.stringify({ open: explorerOpen, width: explorerWidth }));
+  }
+
+  async function loadExplorerState() {
+    let saved = null;
+    try { saved = JSON.parse((await Store.read('explorer.json')) || 'null'); } catch (_) { saved = null; }
+    if (saved && Number(saved.width)) setExplorerWidth(Number(saved.width));
+    setExplorerOpen(saved && saved.open === false ? false : true);
+  }
+
+  const activeFilePath = () => { const t = activeTab(); return t ? t.path : null; };
+  const ensureVisible = folder => {
+    if (!folder) return;
+    try {
+      const closed = new Set(JSON.parse(sessionStorage.getItem('closedFolders') || '[]'));
+      if (closed.delete(folder)) sessionStorage.setItem('closedFolders', JSON.stringify([...closed]));
+    } catch (_) {}
+  };
+  const parentFolder = () => {
+    const path = activeFilePath();
+    if (!path) return '';
+    const sep = path.includes('\\') ? '\\' : '/';
+    const parts = path.split(/[\\/]/);
+    parts.pop();
+    return parts.join(sep);
+  };
+
+  function markActiveFile() {
+    const path = activeFilePath();
+    for (const b of $$('.tree-file', treeEl)) b.classList.toggle('active', !!path && b.dataset.path === path);
+  }
+
+  function renderTree() {
+    const q = (searchEl.value || '').trim().toLowerCase();
+    const hit = n => !q || n.toLowerCase().includes(q);
+    const closedSet = new Set(JSON.parse(sessionStorage.getItem('closedFolders') || '[]'));
+    const saveClosed = () => sessionStorage.setItem('closedFolders', JSON.stringify([...closedSet]));
+
+    const fileRow = f => {
+      return '<div class="tree-row" draggable="true" data-kind="script" data-path="' + escapeHtml(f.path) + '">' +
+      '<button class="tree-file" draggable="true" type="button" data-path="' + escapeHtml(f.path) + '" title="' + escapeHtml(f.path) + '">' +
+      '<svg class="ico"><use href="#i-file"/></svg><span>' + escapeHtml(f.name) + '</span></button>' +
+      '<button class="tree-del" type="button" data-del="' + escapeHtml(f.path) + '" title="Delete ' + escapeHtml(f.name) + '">' +
+      '<svg class="ico"><use href="#i-trash"/></svg></button></div>';
+    };
+
+    const folder = f => {
+      const files = (f.files || []).filter(x => hit(x.name));
+      const kids = (f.folders || []).filter(x => hit(x.name));
+      if (!hit(f.name) && !files.length && !kids.length) return '';
+      const open = !!q || !closedSet.has(f.path);
+      return '<div class="tree-folder' + (open ? ' open' : '') + '" data-folder="' + escapeHtml(f.path) + '">' +
+        '<div class="tree-label" draggable="true" data-kind="folder" data-path="' + escapeHtml(f.path) + '" data-folder="' + escapeHtml(f.path) + '">' +
+        '<svg class="ico tree-caret"><use href="#i-chevron-right"/></svg>' +
+        '<svg class="ico"><use href="#i-folder"/></svg><span>' + escapeHtml(f.name) + '</span>' +
+        '<button class="tree-del" type="button" data-delfolder="' + escapeHtml(f.path) + '" title="Delete folder ' + escapeHtml(f.name) + '">' +
+        '<svg class="ico"><use href="#i-trash"/></svg></button></div>' +
+        (open ? kids.map(folder).join('') + files.map(fileRow).join('') : '') +
+        '</div>';
+    };
+
+    const out = (scriptTree.folders || []).map(folder).join('');
+    treeEl.innerHTML = out || '<div class="tree-empty">No scripts found.</div>';
+    saveClosed();
+    markActiveFile();
+  }
+
+  let treeSig = '';
+  let refreshBusy = false;
+  const treeSignature = tree => {
+    const out = [];
+    const walk = (folders, depth) => {
+      for (const f of folders || []) {
+        out.push(depth + ':d:' + (f.path || f.name));
+        for (const s of f.files || []) {
+          out.push(depth + ':f:' + s.path + ':' + (s.modified || ''));
+        }
+        walk(f.folders, depth + 1);
+      }
+    };
+    walk(tree && tree.folders, 0);
+    return out.join('|');
+  };
+
+  async function refreshExplorer() {
+    if (refreshBusy) return;
+    refreshBusy = true;
+    try {
+      const next = (await pyInvoke('list_scripts', {})) || { folders: [] };
+      const sig = treeSignature(next);
+      scriptTree = next;
+      if (sig === treeSig) { markActiveFile(); return; }
+      treeSig = sig;
+      renderTree();
+    } catch (err) {
+      console.error(err);
+      treeEl.innerHTML = '<div class="tree-empty">Could not read the scripts folder.</div>';
+    } finally {
+      refreshBusy = false;
+    }
+  }
+
+  /* keep the file list in sync with disk */
+  const treeRoot = treeEl.closest('.explorer') || treeEl.parentElement;
+  setInterval(() => {
+    if (dragPath || refreshBusy) return;
+    if (treeRoot && treeRoot.offsetParent === null) return;
+    refreshExplorer();
+  }, 2000);
+
+  async function readScript(path) {
+    try { return await pyInvoke('read_script', { path }); } catch (_) { return null; }
+  }
+
+  async function openFileAt(path) {
+    const res = await pyInvoke('read_script', { path });
+    if (!res || !res.ok) { toast((res && res.message) || 'Could not open the file'); return null; }
+    return res;
+  }
+
+  /* ---- ask dialog (blurred popup, same as the profile one) ---- */
+  const askOverlay = $('#askOverlay');
+  const askTitle = $('#askTitle');
+  const askSub = $('#askSub');
+  const askLabel = $('#askLabel');
+  const askInput = $('#askInput');
+  const askOk = $('#askOk');
+  let askAction = null;
+
+  function ask(opts) {
+    const o = opts || {};
+    askTitle.textContent = o.title || '';
+    askSub.textContent = o.sub || '';
+    askSub.hidden = !o.sub;
+    askLabel.hidden = !o.label;
+    askInput.hidden = !o.label;
+    askInput.value = o.value || '';
+    askOk.textContent = o.ok || 'Create';
+    askOk.classList.toggle('danger', !!o.danger);
+    askOk.classList.toggle('primary', !o.danger);
+    askAction = o.onOk || null;
+    askOverlay.hidden = false;
+    setTimeout(() => { if (o.label) askInput.focus(); else askOk.focus(); }, 40);
+  }
+  function closeAsk() {
+    askOverlay.hidden = true;
+    askAction = null;
+  }
+  const runAsk = () => { const fn = askAction; closeAsk(); if (fn) fn(); };
+  askOk.addEventListener('click', runAsk);
+  $('#askCancel').addEventListener('click', closeAsk);
+  askOverlay.addEventListener('mousedown', ev => { if (ev.target === askOverlay) closeAsk(); });
+  askInput.addEventListener('keydown', ev => { if (ev.key === 'Enter' && askAction) runAsk(); });
+
+  treeEl.addEventListener('click', async ev => {
+    const label = ev.target.closest('.tree-label');
+    if (label && !ev.target.closest('.tree-del')) {
+      const holder = label.parentElement;
+      const path = holder.dataset.folder;
+      let closed;
+      try { closed = new Set(JSON.parse(sessionStorage.getItem('closedFolders') || '[]')); }
+      catch (_) { closed = new Set(); }
+      const isOpen = holder.classList.contains('open');
+      if (isOpen) closed.add(path); else closed.delete(path);
+      sessionStorage.setItem('closedFolders', JSON.stringify([...closed]));
+      holder.classList.toggle('open', !isOpen);
+      const kids = holder.querySelector(':scope > .tree-folder, :scope > .tree-row');
+      if (kids) kids.hidden = isOpen;
+      return;
+    }
+
+    const del = ev.target.closest('[data-del]');
+    if (del) {
+      ev.stopPropagation();
+      const path = del.dataset.del;
+      const name = path.split(/[\\/]/).pop();
+      ask({
+        title: 'Delete script?', sub: name, ok: 'Delete', danger: true,
+        onOk: async () => {
+          const res = await pyInvoke('delete_script', { path });
+          if (!res || !res.ok) { toast((res && res.message) || 'Could not delete the file'); return; }
+          treeSig = '';
+          const open = tabs.find(t => t.path === path);
+          if (open) closeTab(open.id);
+          await refreshExplorer();
+          toast('Deleted ' + name);
+        }
+      });
+      return;
+    }
+
+    const delFolder = ev.target.closest('[data-delfolder]');
+    if (delFolder) {
+      ev.stopPropagation();
+      const path = delFolder.dataset.delfolder;
+      const name = path.split(/[\\/]/).pop();
+      ask({
+        title: 'Delete folder?', sub: 'Everything inside ' + name + ' is deleted too.', ok: 'Delete', danger: true,
+        onOk: async () => {
+          const res = await pyInvoke('delete_folder', { path });
+          if (!res || !res.ok) { toast((res && res.message) || 'Could not delete the folder'); return; }
+          treeSig = '';
+          await refreshExplorer();
+          toast('Deleted ' + name);
+        }
+      });
+      return;
+    }
+
+    const btn = ev.target.closest('.tree-file');
+    if (!btn) return;
+    const res = await openFileAt(btn.dataset.path);
+    if (res) {
+      openTab(res.name, res.content || '', res.path);
+      toast('Opened ' + res.name);
+    }
+  });
+
+  /* drag scripts or folders onto another folder to move them, onto a tab to open them */
+  let dragPath = null, dragKind = null;
+  const clearDropMarks = root => { for (const el of $$('.drop', root)) el.classList.remove('drop'); };
+  const allowDrop = (ev, el) => {
+    ev.preventDefault();
+    try { ev.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    el.classList.add('drop');
+  };
+
+  treeEl.addEventListener('dragstart', ev => {
+    const src = ev.target.closest('.tree-row, .tree-label');
+    if (!src || !src.dataset.path) return;
+    dragPath = src.dataset.path;
+    dragKind = src.dataset.kind || 'script';
+    try {
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', dragPath);
+    } catch (_) {}
+  });
+  treeEl.addEventListener('dragend', () => { dragPath = null; dragKind = null; clearDropMarks(treeEl); });
+  treeEl.addEventListener('dragover', ev => {
+    if (!dragPath) return;
+    const label = ev.target.closest('.tree-label');
+    if (!label || !label.dataset.folder) return;
+    if (dragKind === 'folder' && (label.dataset.folder === dragPath || label.dataset.folder.startsWith(dragPath + '\\') || label.dataset.folder.startsWith(dragPath + '/'))) return;
+    allowDrop(ev, label);
+  });
+  treeEl.addEventListener('dragleave', ev => {
+    const label = ev.target.closest('.tree-label');
+    if (label) label.classList.remove('drop');
+  });
+treeEl.addEventListener('drop', async ev => {
+  const label = ev.target.closest('.tree-label');
+  if (!label) return;
+  ev.preventDefault();
+  clearDropMarks(treeEl);
+  const path = dragPath || (ev.dataTransfer && ev.dataTransfer.getData('text/plain'));
+  const kind = dragKind || 'script';
+  dragPath = null; dragKind = null;
+  if (!path || !label.dataset.folder) return;
+  const dest = label.dataset.folder;
+  const res = await pyInvoke(kind === 'folder' ? 'move_folder' : 'move_script', { path, folder: dest });
+  if (!res || !res.ok) { toast((res && res.message) || 'Could not move it'); return; }
+  if (kind === 'script') {
+    const open = tabs.find(t => t.path === path);
+    if (open) { open.path = res.path; open.name = res.name; renderTabs(); persistTabs(); }
+  }
+  ensureVisible(dest);
+  await refreshExplorer();
+  const box = treeEl.querySelector('.tree-label[data-folder="' + res.path.replace(/"/g, '\\"') + '"]');
+  if (box) box.classList.add('drop');
+  toast('Moved to ' + (box ? box.querySelector('span').textContent : res.name));
+});
+
+  tabsEl.addEventListener('dragover', ev => {
+    const tab = ev.target.closest('.tab');
+    if (!tab || !dragPath) return;
+    allowDrop(ev, tab);
+  });
+  tabsEl.addEventListener('dragleave', ev => {
+    const tab = ev.target.closest('.tab');
+    if (tab) tab.classList.remove('drop');
+  });
+  tabsEl.addEventListener('drop', async ev => {
+    const tabBtn = ev.target.closest('.tab');
+    if (!tabBtn) return;
+    ev.preventDefault();
+    clearDropMarks(tabsEl);
+    const path = dragPath || (ev.dataTransfer && ev.dataTransfer.getData('text/plain'));
+    dragPath = null;
+    if (!path) return;
+    const res = await openFileAt(path);
+    if (!res) return;
+    const target = tabs.find(t => String(t.id) === tabBtn.dataset.id);
+    if (target && target.model.getValue() === target.saved) {
+      target.model.setValue(res.content || '');
+      target.name = res.name;
+      target.path = res.path;
+      target.saved = res.content || '';
+      renderTabs();
+      persistTabs();
+    } else {
+      openTab(res.name, res.content || '', res.path);
+    }
+    toast('Opened ' + res.name);
+  });
+
+  searchEl.addEventListener('input', renderTree);
+  $('#explorerRefresh').addEventListener('click', refreshExplorer);
+
+  $('#newFileBtn').addEventListener('click', () => {
+    ask({
+      title: 'New script', sub: 'Created in the folder of the current tab.',
+      label: 'Name', value: 'script.luau', ok: 'Create',
+      onOk: async () => {
+        const name = askInput.value.trim();
+        if (!name) return;
+        const parent = parentFolder();
+        const res = await pyInvoke('new_script', { name, folder: parent });
+        if (!res || !res.ok) { toast((res && res.message) || 'Could not create the script'); return; }
+        ensureVisible(parent);
+        openTab(res.name, res.content || '', res.path);
+        await refreshExplorer();
+        toast('Created ' + res.name);
+      }
+    });
+  });
+
+$('#newFolderBtn').addEventListener('click', () => {
+  ask({
+    title: 'New folder', sub: 'Created at the top of the list. Drag it into any folder afterwards.',
+    label: 'Name', value: 'New folder', ok: 'Create',
+    onOk: async () => {
+      const name = askInput.value.trim();
+      if (!name) return;
+      const res = await pyInvoke('create_folder', { name, folder: '' });
+      if (!res || !res.ok) { toast((res && res.message) || 'Could not create the folder'); return; }
+      ensureVisible('');
+      await refreshExplorer();
+      toast('Created ' + res.name);
+    }
+  });
+});
+
+  $('#newTabBtn').addEventListener('click', () => openTab(uniqueName('Script 1'), '', null));
+  $('#openFallback').addEventListener('change', async ev => {
+    const f = ev.target.files[0];
+    if (f) loadText(await f.text(), f.name, null);
+    ev.target.value = '';
+  });
+
+  addEventListener('keydown', ev => {
+    if (!(ev.ctrlKey || ev.metaKey) || currentPage !== 'editor' || !editor || !overlay.hidden) return;
+    const k = ev.key.toLowerCase();
+    if (k === 's') { ev.preventDefault(); saveFile(ev.shiftKey); }
+    else if (k === 'o') { ev.preventDefault(); openFile(); }
+    else if (k === 't') { ev.preventDefault(); openTab(uniqueName('Script 1'), '', null); }
+    else if (k === 'w') { ev.preventDefault(); if (activeTabId !== null) closeTab(activeTabId); }
+  });
+
+  const setFont = $('#setFont'), setFontOut = $('#setFontOut');
+  const setSpaces = $('#setSpaces'), setMinimap = $('#setMinimap'), tabSeg = $('#tabSeg');
+  let saveTimer;
+
+  function applySettings() {
+    const root = document.documentElement.style;
+    root.setProperty('--fs', settings.fontSize + 'px');
+    root.setProperty('--lh', Math.round(settings.fontSize * 1.3) + 'px');
+    root.setProperty('--tab', settings.tabSize);
+    applyEditorSettings();
+  }
+  function syncSettingsUI() {
+    setFont.value = settings.fontSize;
+    setFontOut.textContent = settings.fontSize + 'px';
+    setSpaces.setAttribute('aria-checked', String(settings.useSpaces));
+    setMinimap.setAttribute('aria-checked', String(settings.minimap));
+    $$('button', tabSeg).forEach(b => b.classList.toggle('on', +b.dataset.size === settings.tabSize));
+  }
+  function persistSettings() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => Store.write('settings.json', JSON.stringify(settings)), 250);
+  }
+  function changeSettings(patch) {
+    settings = { ...settings, ...patch };
+    applySettings(); syncSettingsUI(); persistSettings();
+  }
+
+  setFont.addEventListener('input', () => changeSettings({ fontSize: +setFont.value }));
+  tabSeg.addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-size]');
+    if (b) changeSettings({ tabSize: +b.dataset.size });
+  });
+  setSpaces.addEventListener('click', () => changeSettings({ useSpaces: !settings.useSpaces }));
+  setMinimap.addEventListener('click', () => changeSettings({ minimap: !settings.minimap }));
+
+  let resetArmed = false, resetTimer;
+  $('#resetBtn').addEventListener('click', async ev => {
+    const btn = ev.currentTarget;
+    if (!resetArmed) {
+      resetArmed = true;
+      btn.textContent = 'Click again to confirm';
+      resetTimer = setTimeout(() => { resetArmed = false; btn.textContent = 'Reset'; }, 3000);
+      return;
+    }
+    clearTimeout(resetTimer);
+    resetArmed = false; btn.textContent = 'Reset';
+    await Store.write('firsttime.txt', 'true');
+    await Store.remove('profile.json');
+    profile = null;
+    updateProfileUI();
+    showPage('home');
+    openProfile(true);
+  });
+
+  const overlay = $('#profileOverlay');
+  const modal = $('#modal');
+  const usernameInput = $('#usernameInput');
+  const avatarPick = $('#avatarPick'), avatarImg = $('#avatarImg'), avatarPh = $('#avatarPh');
+  const pickBtn = $('#pickBtn'), removeBtn = $('#removeBtn');
+  const pmSave = $('#pmSave'), pmCancel = $('#pmCancel');
+  const avatarFile = $('#avatarFile');
+  let modalFirst = false, pendingAvatar = null, lastFocus = null;
+
+  function renderAvatar() {
+    const has = !!pendingAvatar;
+    if (has) avatarImg.src = pendingAvatar;
+    avatarImg.hidden = !has;
+    avatarPh.hidden = has;
+    avatarPick.classList.toggle('has-img', has);
+    removeBtn.hidden = !has;
+    pickBtn.textContent = has ? 'Change picture' : 'Choose picture';
+  }
+  function validate() { pmSave.disabled = !usernameInput.value.trim(); }
+
+  function openProfile(first) {
+    modalFirst = first;
+    pendingAvatar = (profile && profile.avatar) || null;
+    usernameInput.value = (profile && profile.username) || '';
+    $('#pmTitle').textContent = first ? 'Set up your profile' : 'Your profile';
+    $('#pmSub').textContent = first
+      ? 'Choose a profile picture and a username to get started.'
+      : 'Change your profile picture or username.';
+    pmCancel.hidden = first;
+    pmSave.textContent = first ? 'Continue' : 'Save changes';
+    modal.classList.toggle('first', first);
+    renderAvatar(); validate();
+    lastFocus = document.activeElement;
+    overlay.hidden = false;
+    setTimeout(() => usernameInput.focus(), 40);
+  }
+  function closeProfile() {
+    overlay.hidden = true;
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  function fileToAvatar(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const size = 256, c = document.createElement('canvas');
+        c.width = c.height = size;
+        const s = Math.min(img.naturalWidth, img.naturalHeight);
+        c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, size, size);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/webp', 0.9));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Not an image')); };
+      img.src = url;
+    });
+  }
+
+  avatarPick.addEventListener('click', () => avatarFile.click());
+  pickBtn.addEventListener('click', () => avatarFile.click());
+  removeBtn.addEventListener('click', () => { pendingAvatar = null; renderAvatar(); });
+  avatarFile.addEventListener('change', async () => {
+    const f = avatarFile.files[0];
+    avatarFile.value = '';
+    if (!f) return;
+    try { pendingAvatar = await fileToAvatar(f); renderAvatar(); }
+    catch (_) { toast('That file is not a valid image'); }
+  });
+
+  usernameInput.addEventListener('input', validate);
+  usernameInput.addEventListener('keydown', ev => { if (ev.key === 'Enter' && !pmSave.disabled) saveProfile(); });
+
+  async function saveProfile() {
+    const name = usernameInput.value.trim().slice(0, 24);
+    if (!name) return;
+    pmSave.disabled = true;
+    profile = { username: name, avatar: pendingAvatar };
+    await Store.write('profile.json', JSON.stringify(profile));
+    if (modalFirst) await Store.write('firsttime.txt', 'false');
+    updateProfileUI();
+    closeProfile();
+  }
+  pmSave.addEventListener('click', saveProfile);
+  pmCancel.addEventListener('click', closeProfile);
+  $('#profileBtn').addEventListener('click', () => openProfile(false));
+
+  overlay.addEventListener('mousedown', ev => { if (ev.target === overlay && !modalFirst) closeProfile(); });
+  overlay.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !modalFirst) { closeProfile(); return; }
+    if (ev.key === 'Tab') {                       // keep focus inside the popup
+      const f = $$('button, input[type=text]', modal).filter(el => !el.hidden && !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+    }
+  });
+
+  let introGone = false;
+  const introStart = performance.now();
+  const INTRO_MIN = 1700;
+  function hideIntro() {
+    if (introGone) return;
+    introGone = true;
+    const wait = Math.max(0, INTRO_MIN - (performance.now() - introStart));
+    setTimeout(() => {
+      const el = $('#intro');
+      if (!el) return;
+      el.classList.add('is-leaving');
+      setTimeout(() => el.remove(), 1000);
+    }, wait);
+  }
+
+  async function boot() {
+    await Store.init();
+
+    try {
+      const s = JSON.parse((await Store.read('settings.json')) || '{}');
+      settings = {
+        fontSize: Math.min(28, Math.max(12, +s.fontSize || DEFAULTS.fontSize)),
+        tabSize: [2, 4, 8].includes(+s.tabSize) ? +s.tabSize : DEFAULTS.tabSize,
+        useSpaces: typeof s.useSpaces === 'boolean' ? s.useSpaces : DEFAULTS.useSpaces,
+        minimap: typeof s.minimap === 'boolean' ? s.minimap : DEFAULTS.minimap
+      };
+    } catch (_) { settings = { ...DEFAULTS }; }
+    applySettings(); syncSettingsUI();
+
+    try { profile = JSON.parse((await Store.read('profile.json')) || 'null'); } catch (_) { profile = null; }
+    updateProfileUI();
+
+    const ft = await Store.read('firsttime.txt');
+    const firstRun = ft === null || ft.trim().toLowerCase() !== 'false';
+    if (firstRun || !profile || !profile.username) openProfile(true);
+
+    await initEditor();
+    initHub();
+    await loadExplorerState();
+    await refreshExplorer();
+    logUi('READY tabs=' + tabs.length + ' tree=' + (scriptTree.folders || []).length + ' editor=' + (editor ? 'yes' : 'no'));
+    setTimeout(() => {
+      const pt = (x, y) => { const e = document.elementFromPoint(x, y); return e ? (e.id || e.className || e.tagName) : 'null'; };
+      const nav0 = $('.nav-btn[data-page]');
+      logUi('PROBE intro=' + (document.getElementById('intro') ? 'present' : 'gone') +
+        ' overlay=' + (document.querySelectorAll('.overlay:not([hidden])').length) +
+        ' nav=' + $$('.nav-btn').length + '/' + $$('.nav-btn[data-page]').length +
+        ' tabs=' + $$('.tab').length + ' tabstrip=' + pt(700, 40) +
+        ' sidebar=' + pt(25, 300) + ' navPe=' + (nav0 ? getComputedStyle(nav0).pointerEvents : '?'));
+    }, 2600);
+  }
+  boot()
+    .catch(err => { console.error('[FunnyExecutor] startup failed', err); toast('Startup problem: ' + (err && err.message || err)); })
+    .finally(hideIntro);
+})();
+</script>
+</body>
+</html>

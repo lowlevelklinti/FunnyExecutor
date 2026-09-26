@@ -46,7 +46,6 @@ class LuauHighlighter(QSyntaxHighlighter):
 
         self.rules = []
 
-        # keywords
         keywordFormat = QTextCharFormat()
         keywordFormat.setForeground(QColor("#8e9ae6"))
         keywordFormat.setFontWeight(boldFont)
@@ -60,7 +59,6 @@ class LuauHighlighter(QSyntaxHighlighter):
             pattern = QRegularExpression(f"\\b{word}\\b")
             self.rules.append((pattern, keywordFormat))
 
-        # booleans
         boolFormat = QTextCharFormat()
         boolFormat.setForeground(QColor("#d6cc61"))
         boolFormat.setFontWeight(boldFont)
@@ -69,7 +67,6 @@ class LuauHighlighter(QSyntaxHighlighter):
             pattern = QRegularExpression(f"\\b{word}\\b")
             self.rules.append((pattern, boolFormat))
 
-        # globals
         globalsFormat = QTextCharFormat()
         globalsFormat.setForeground(QColor("#d6cc61"))
         self.globalsKeywords = [
@@ -91,71 +88,62 @@ class LuauHighlighter(QSyntaxHighlighter):
             pattern = QRegularExpression(f"\\b{word}\\b")
             self.rules.append((pattern, globalsFormat))
 
-        # unc
         uncFormat = QTextCharFormat()
         uncFormat.setForeground(QColor("#8e9ae6"))
         self.uncKeywords = [
             'getgenv', 'base64encode', 'base64decode', 'crypt',
-            'lz4compress', 'lz4decompress', 'loadstring', 'writefile',
-            'appendfile', 'readfile', 'isfile', 'isfolder',
-            'delfile', 'delfolder', 'makefolder', 'listfiles',
-            'setclipboard', 'getclipboard', 'messagebox', 'identifyexecutor',
-            'loadfile', 'setfpscap', 'getfpscap', 'getexecutorname',
-            'getexecutorversion', 'islclosure',
-            'iscclosure', 'newcclosure', 'gethui', 'getnilinstances', 'getloadedmodules',
-            'getscripts', 'isreadonly', 'queue_on_teleport',
-            'getnamecallmethod', 'http_request', 'crypt', 'hash',
-            'messagebox', 'mouse1click', 'mouse2click', 'mouse1press',
-            'mouse1release', 'mouse2press', 'mouse2release', 'movemouse',
-            'mousemoveabs', 'mouserel', 'mousemoverel', 'getmousepos',
-            'getmouselocation', 'keyclick', 'keypress', 'keyrelease',
-            'iswindowactive', 'isrbxactive', 'getscriptbytecode', 'dumpstring',
-            'getscripthash', 'Drawing', 'WebSocket', 'websocket', 'decompile',
-            'saveinstance', 'savegame', 'isrenderavailable', 'getrenderproperty',
-            'setrenderproperty', 'request', 'syn', 'http',
-            'Signal', 'openfiledialog', 'savefiledialog', 'openfolderdialog',
-            'openfilesdialog', 'getinstances', 'getcustomasset',
-            'getrenv', 'getreg', 'getgc', 'filtergc', 'getsenv',
-            'getconstant', 'getconstants', 'getupvalue', 'getupvalues',
-            'setupvalue', 'setconstant', 'getproto', 'getprotos',
-            'getstack', 'setstack'
+            'lz4compress', 'lz4decompress', 'loadstring',
+            'writefile', 'appendfile', 'readfile', 'isfile',
+            'isfolder', 'delfile', 'delfolder', 'makefolder',
+            'listfiles', 'setclipboard', 'getclipboard', 'messagebox',
+            'identifyexecutor', 'isnetworkowner', 'loadfile', 'setfpscap',
+            'getfpscap', 'getexecutorname', 'getexecutorversion', 'cloneref',
+            'compareinstances', 'islclosure', 'iscclosure', 'newcclosure',
+            'clonefunction', 'isexecutorclosure', 'checkclosure', 'gethui',
+            'getnilinstances', 'getloadedmodules', 'getscripts',
+            'getrunningscripts', 'isreadonly', 'queue_on_teleport',
+            'getnamecallmethod', 'http_request', 'crypt', 'hash', 'messagebox',
+            'mouse1click', 'mouse2click', 'mouse1press', 'mouse1release',
+            'mouse2press', 'mouse2release', 'movemouse', 'mousemoveabs',
+            'mouserel', 'mousemoverel', 'getmousepos', 'getmouselocation',
+            'keyclick', 'keypress', 'keyrelease', 'iswindowactive', 'isrbxactive',
+            'getscriptbytecode', 'dumpstring', 'getscripthash', 'Drawing',
+            'WebSocket', 'decompile', 'saveinstance', 'savegame',
+            'isrenderavailable', 'getrenderproperty', 'setrenderproperty',
+            'request', 'syn', 'http', 'Signal',
+            'openfiledialog', 'savefiledialog', 'openfolderdialog', 'openfilesdialog',
+            'firetouchinterest', 'fireproximityprompt', 'fireclickdetector',
+            'getconnections', 'hookfunction', 'hookmetamethod',
+            'getrawmetatable', 'setrawmetatable', 'checkcaller',
+            'getcallingscript', 'getinstances', 'gethiddenproperty', 'sethiddenproperty',
+            'setsimulationradius', 'isscriptable', 'setscriptable', 'getcustomasset'
         ]
         for word in self.uncKeywords:
             pattern = QRegularExpression(f"\\b{word}\\b")
             self.rules.append((pattern, uncFormat))
 
-        # numbers
         numberFormat = QTextCharFormat()
         numberFormat.setForeground(QColor("#d6cc61"))
         self.rules.append((QRegularExpression(r"\b\d+(\.\d+)?\b"), numberFormat))
 
-        # member
         memberFormat = QTextCharFormat()
         memberFormat.setForeground(QColor("#7b99ec"))
 
         memberPattern = QRegularExpression(r"(?<=\.)[a-zA-Z_][a-zA-Z0-9_]*\b")
         self.rules.append((memberPattern, memberFormat))
-
-        # functions
         functionFormat = QTextCharFormat()
         functionFormat.setForeground(QColor("#7b99ec"))
-
-        # func calls
         pat = '|'.join(self.uncKeywords + self.globalsKeywords)
         callPattern = QRegularExpression(r"\b(?!(?:"+pat+r")\b)[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()")
         self.rules.append((callPattern, functionFormat))
-
-        # func defs
         defPattern = QRegularExpression(r"\bfunction\s+\K[a-zA-Z_][a-zA-Z0-9_]*\b")
         self.rules.append((defPattern, functionFormat))
 
-        # strings
         stringFormat = QTextCharFormat()
         stringFormat.setForeground(QColor("#abd4b4"))
         self.rules.append((QRegularExpression('"[^"\\\\]*(\\\\.[^"\\\\]*)*"'), stringFormat))
         self.rules.append((QRegularExpression("'[^'\\\\]*(\\\\.[^'\\\\]*)*'"), stringFormat))
 
-        # comment
         self.commentFormat = QTextCharFormat()
         self.commentFormat.setForeground(QColor("#646464"))
         self.commentFormat.setFontItalic(True)
@@ -406,16 +394,17 @@ class CodeEditor(QPlainTextEdit):
 
         self.setObjectName(u"codeEditor")
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.setStyleSheet("QPlainTextEdit{background-color:#131313;color:#d0d0d0;border:none;padding:6px 6px 6px 4px;selection-background-color:#264f78;}")
+        self.setStyleSheet("QPlainTextEdit{background-color:#000000;color:#e6e6e6;border:none;padding:6px 6px 6px 4px;selection-background-color:rgba(255,255,255,45);selection-color:#ffffff;}")
 
         font1 = QFont()
-        font1.setFamilies([u"Consolas"])
+        font1.setFamilies([u"Cascadia Mono", u"Consolas"])
         font1.setPointSize(11)
         self.setFont(font1)
 
         self.lineNumberArea = LineNumberArea(self)
         self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
         self.updateRequest.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self._updateActiveLineNumber)
         self.updateLineNumberAreaWidth()
 
         self.highlighter = None
@@ -512,6 +501,9 @@ class CodeEditor(QPlainTextEdit):
         digits = max(1, len(str(self.blockCount())))
         return 16 + self.fontMetrics().horizontalAdvance("9") * digits
 
+    def _updateActiveLineNumber(self):
+        self.lineNumberArea.update()
+
     def updateLineNumberAreaWidth(self, _=0):
         self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
 
@@ -530,15 +522,16 @@ class CodeEditor(QPlainTextEdit):
 
     def lineNumberAreaPaintEvent(self, event):
         painter = QPainter(self.lineNumberArea)
-        painter.fillRect(event.rect(), QColor("#131313"))
+        painter.fillRect(event.rect(), QColor("#000000"))
         block = self.firstVisibleBlock()
         blockNumber = block.blockNumber()
+        activeBlock = self.textCursor().blockNumber()
         top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
         bottom = top + self.blockBoundingRect(block).height()
-        painter.setPen(QColor("#4a4a4a"))
         height = self.fontMetrics().height()
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
+                painter.setPen(QColor("#ffffff") if blockNumber == activeBlock else QColor("#9a9a9a"))
                 painter.drawText(0, int(top), self.lineNumberArea.width() - 8, height,
                                  Qt.AlignmentFlag.AlignRight, str(blockNumber + 1))
             block = block.next()

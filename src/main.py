@@ -7,14 +7,16 @@ import psutil
 
 from design import Ui_MainWindow, Icons, svgIcon, navIcon
 
-from PySide6.QtCore import QTimer, Qt, QThread, QObject, Signal, Slot, QEvent
+from PySide6.QtCore import (QTimer, Qt, QThread, QObject, Signal, Slot, QEvent,
+    QPropertyAnimation, QParallelAnimationGroup, QEasingCurve)
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QSizeGrip, QTreeWidgetItem
 from extras import CodeEditor, MessageBox
 
 import FAPI
 
-navDim = "#8a8a8a"
-navActive = "#e6e6e6"
+navDim = "#cfcfcf"
+navActive = "#ffffff"
 
 class RobloxWorker(QObject):
     statusChanged = Signal(str)
@@ -161,23 +163,21 @@ class RobloxWorker(QObject):
 class Window(QMainWindow, Ui_MainWindow):
     injectRequested = Signal()
     executeRequested = Signal(str)
-
     def __init__(self):
         super().__init__()
         self.setupUi(self)
-
         self._tabNumber = 0
-        self.sidebarVisible = True
-
+        self._explorerOpen = True
+        self._explorerWidth = 246
+        self._explorerMinWidth = 210
+        self._explorerMaxWidth = 520
         self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
-
         self.sizeGrip = QSizeGrip(self)
-        self.sizeGrip.resize(16, 16)
-
+        self.sizeGrip.resize(14, 14)
         self.iconRail.installEventFilter(self)
-        self.breadcrumb.installEventFilter(self)
+        self.titlebar.installEventFilter(self)
         self.tabStrip.installEventFilter(self)
-
+        self._setupExplorer()
         self._thread = QThread(self)
         self._worker = RobloxWorker()
         self._worker.moveToThread(self._thread)
@@ -186,36 +186,29 @@ class Window(QMainWindow, Ui_MainWindow):
         self.injectRequested.connect(self._worker.requestInject)
         self.executeRequested.connect(self._worker.requestExecute)
         self._thread.started.connect(self._worker.start)
-
         self.injectButton.clicked.connect(self.onInject)
         self.executeButton.clicked.connect(self.onExecute)
         self.newTabButton.clicked.connect(self.onNewTab)
-
-        self.redBtn.clicked.connect(self.close)
-        self.yellowBtn.clicked.connect(self.showMinimized)
-        self.greenBtn.clicked.connect(self._toggleMax)
-
+        self.closeBtn.clicked.connect(self.close)
+        self.minimizeBtn.clicked.connect(self.showMinimized)
+        self.maximizeBtn.clicked.connect(self._toggleMax)
         self.editorNavBtn.clicked.connect(self.onShowEditor)
-        self.filesNavBtn.clicked.connect(self.onToggleSidebar)
+        self.filesNavBtn.clicked.connect(self.toggleExplorer)
+        self.explorerPill.clicked.connect(self.toggleExplorer)
         self.settingsNavBtn.clicked.connect(self.onShowSettings)
         self.settingsNavBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.settingsNavBtn.customContextMenuRequested.connect(self.onSettingsMenu)
-
         self.scriptTree.itemDoubleClicked.connect(self._onTreeItemDoubleClicked)
         self.searchEdit.textChanged.connect(self._onSearch)
-
         self.actionExitAltF4.triggered.connect(QApplication.quit)
         self.actionExport.triggered.connect(self.exportLuau)
         self.actionImport.triggered.connect(self.importLuau)
         self.actionInject.triggered.connect(self.onInject)
         self.actionExecute.triggered.connect(self.onExecute)
-
         self.actionNewTab.triggered.connect(lambda: self.onNewTab())
         self.actionSaveTabs.triggered.connect(lambda: self._saveTabs())
         self.actionClearTabs.triggered.connect(self._clearTabs)
-
         self.actionTopMost.triggered.connect(self.onTop)
-
         self.actionExecute.setShortcut("Ctrl+Return")
         self.actionInject.setShortcut("Ctrl+I")
         self.actionNewTab.setShortcut("Ctrl+N")
@@ -226,79 +219,104 @@ class Window(QMainWindow, Ui_MainWindow):
                     self.actionSaveTabs, self.actionImport, self.actionExport,
                     self.actionClearTabs, self.actionExitAltF4):
             self.addAction(act)
-
         self.tabBar.tabCloseRequested.connect(self.closeTab)
         self.tabBar.currentChanged.connect(self.onTabChanged)
         self.tabBar.tabMoved.connect(self._onTabMoved)
-
         self._refreshTree()
-
         self.applyNavState()
-
         self._loadTabs()
         self.attachCurrentEditor()
-
         self.onTop()
-
         self._thread.start()
-
         self._autosaveTimer = QTimer(self)
         self._autosaveTimer.timeout.connect(self._saveTabs)
         self._autosaveTimer.start(10000)
-
     def eventFilter(self, obj, event):
-        if obj in (self.iconRail, self.breadcrumb, self.tabStrip) and event.type() == QEvent.Type.MouseButtonPress:
+        if obj in (self.iconRail, self.titlebar) and event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 handle = self.windowHandle()
                 if handle is not None:
                     handle.startSystemMove()
         return super().eventFilter(obj, event)
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.sizeGrip.move(self.width() - self.sizeGrip.width(), self.height() - self.sizeGrip.height())
         self.sizeGrip.raise_()
-
+    def _setupExplorer(self):
+        self.explorerPanel.setMinimumWidth(self._explorerWidth)
+        self.explorerPanel.setMaximumWidth(self._explorerWidth)
+        self._explorerAnim = QParallelAnimationGroup(self)
+        self._explorerAnimMin = QPropertyAnimation(self.explorerPanel, b"minimumWidth", self)
+        self._explorerAnimMax = QPropertyAnimation(self.explorerPanel, b"maximumWidth", self)
+        for anim in (self._explorerAnimMin, self._explorerAnimMax):
+            anim.setDuration(190)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._explorerAnim.addAnimation(anim)
+        self.explorerGrip.resizeStarted.connect(self._onExplorerResizeStart)
+        self.explorerGrip.resized.connect(self._onExplorerResized)
+        self.explorerGrip.resizeFinished.connect(self._onExplorerResizeEnd)
+        self._setExplorerChevron(self._explorerOpen)
+    def _setExplorerChevron(self, open_):
+        svg = Icons.chevronRight if open_ else Icons.chevronLeft
+        self.explorerPill.setIcon(navIcon(svg, 16, dim="#cfcfcf", active="#ffffff"))
+        self.explorerPill.setToolTip(u"Hide file explorer" if open_ else u"Show file explorer")
+    def _animateExplorerTo(self, width):
+        self._explorerAnim.stop()
+        current = self.explorerPanel.width()
+        if current == width:
+            return
+        for anim in (self._explorerAnimMin, self._explorerAnimMax):
+            anim.setStartValue(current)
+            anim.setEndValue(width)
+        self._explorerAnim.start()
+    def toggleExplorer(self):
+        self._explorerOpen = not self._explorerOpen
+        self._setExplorerChevron(self._explorerOpen)
+        self._animateExplorerTo(self._explorerWidth if self._explorerOpen else 0)
+        self.applyNavState()
+    def _onExplorerResizeStart(self):
+        self._explorerAnim.stop()
+        current = self.explorerPanel.width()
+        self.explorerPanel.setMinimumWidth(0)
+        self.explorerPanel.setMaximumWidth(current)
+    def _onExplorerResized(self, delta):
+        width = max(self._explorerMinWidth,
+                    min(self._explorerMaxWidth, self.explorerPanel.width() - delta))
+        self._explorerWidth = width
+        self.explorerPanel.setMinimumWidth(width)
+        self.explorerPanel.setMaximumWidth(width)
+    def _onExplorerResizeEnd(self):
+        if not self._explorerOpen:
+            self.toggleExplorer()
     def _toggleMax(self):
         if self.isMaximized():
             self.showNormal()
         else:
             self.showMaximized()
-
     def onShowEditor(self):
         self.mainStack.setCurrentWidget(self.editorPage)
         self.applyNavState()
-
     def onShowSettings(self):
         self.mainStack.setCurrentWidget(self.settingsPage)
         self.applyNavState()
-
-    def onToggleSidebar(self):
-        self.sidebarVisible = not self.sidebarVisible
-        self.sidebar.setVisible(self.sidebarVisible)
-        self.applyNavState()
-
     def setNavIcon(self, button, svg, active):
         base = navActive if active else navDim
-        button.setIcon(navIcon(svg, 20, dim=base, active=navActive))
+        button.setIcon(navIcon(svg, 16, dim=base, active=navActive))
         button.setChecked(active)
         button.setProperty('active', 'true' if active else 'false')
         button.style().unpolish(button)
         button.style().polish(button)
-
     def applyNavState(self):
         showingSettings = self.mainStack.currentWidget() is self.settingsPage
         self.setNavIcon(self.editorNavBtn, Icons.editorTab, not showingSettings)
-        self.setNavIcon(self.filesNavBtn, Icons.folder, self.sidebarVisible)
+        self.setNavIcon(self.filesNavBtn, Icons.folder, self._explorerOpen)
         self.setNavIcon(self.settingsNavBtn, Icons.settingsTab, showingSettings)
-
     def onSettingsMenu(self, pos):
         self.settingsMenu.exec(self.settingsNavBtn.mapToGlobal(pos))
-
     def _refreshTree(self):
         self.scriptTree.clear()
-        folderIcon = svgIcon(Icons.folder, "#9a9a9a", 16)
-        fileIcon = svgIcon(Icons.file, "#9a9a9a", 16)
+        folderIcon = svgIcon(Icons.folder, "#9b9b9b", 16)
+        fileIcon = svgIcon(Icons.file, "#9b9b9b", 16)
         for label, folder in (("Scripts", scriptsDir), ("Auto-Execute", autoexecDir), ("Workspace", workspaceDir)):
             node = QTreeWidgetItem(self.scriptTree, [label])
             node.setIcon(0, folderIcon)
@@ -314,7 +332,6 @@ class Window(QMainWindow, Ui_MainWindow):
             except:
                 pass
         self.scriptTree.expandAll()
-
     def _onTreeItemDoubleClicked(self, item, column):
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if not path:
@@ -326,7 +343,6 @@ class Window(QMainWindow, Ui_MainWindow):
             return
         index = self._addTab(os.path.basename(path), content)
         self.tabBar.setCurrentIndex(index)
-
     def _onSearch(self, text):
         query = text.lower().strip()
         for i in range(self.scriptTree.topLevelItemCount()):
@@ -339,7 +355,6 @@ class Window(QMainWindow, Ui_MainWindow):
                 if not child.isHidden():
                     visibleChildren += 1
             node.setHidden(bool(query) and visibleChildren == 0)
-
     @Slot(str)
     def onStatusChanged(self, state):
         if state == 'injected':
@@ -348,23 +363,19 @@ class Window(QMainWindow, Ui_MainWindow):
             self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
         else:
             self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
-
     @Slot(str, str, str)
     def onShowMessage(self, kind, title, text):
         if kind == 'information':
             MessageBox.information(title, text)
         else:
             MessageBox.warning(title, text)
-
     def onInject(self):
         self.injectRequested.emit()
-
     def onExecute(self):
         editor = self._getCurrentEditor()
         if editor is None:
             return
         self.executeRequested.emit(editor.toPlainText())
-
     def onNewTab(self):
         index = self._addTab()
         self.tabBar.setCurrentIndex(index)
@@ -377,7 +388,6 @@ class Window(QMainWindow, Ui_MainWindow):
         if editor is not None:
             editor.attachHighlighter()
         self._updateBreadcrumb()
-
     def _onTabMoved(self, frm, to):
         widget = self.editorStack.widget(frm)
         if widget is None:
@@ -385,7 +395,6 @@ class Window(QMainWindow, Ui_MainWindow):
         self.editorStack.removeWidget(widget)
         self.editorStack.insertWidget(to, widget)
         self.editorStack.setCurrentIndex(self.tabBar.currentIndex())
-
     def _updateBreadcrumb(self):
         index = self.tabBar.currentIndex()
         name = self.tabBar.tabText(index) if index >= 0 else ""
@@ -393,19 +402,16 @@ class Window(QMainWindow, Ui_MainWindow):
             self.pathLabel.setText(u"Funny Executor  \u203a  " + name)
         else:
             self.pathLabel.setText(u"Funny Executor")
-
     def attachCurrentEditor(self):
         editor = self.editorStack.currentWidget()
         if editor is not None:
             editor.attachHighlighter()
-
     def onTop(self):
         flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
         if self.actionTopMost.isChecked():
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.show()
-
     def importLuau(self):
         filePath, _ = QFileDialog.getOpenFileName(
             self,
@@ -414,11 +420,9 @@ class Window(QMainWindow, Ui_MainWindow):
             "Luau Script (*.luau; *.lua);;All Files (*)"
         )
         editor = self._getCurrentEditor()
-
         if filePath and editor:
             with open(filePath, 'r', encoding='utf-8') as f:
                 editor.setPlainText(f.read())
-
     def exportLuau(self):
         filePath, _ = QFileDialog.getSaveFileName(
             self,
@@ -432,7 +436,6 @@ class Window(QMainWindow, Ui_MainWindow):
             with open(filePath, 'w', encoding='utf-8') as f:
                 f.write(editor.toPlainText())
             self._refreshTree()
-
     def closeTab(self, index):
         widget = self.editorStack.widget(index)
         if widget is not None:
@@ -443,12 +446,10 @@ class Window(QMainWindow, Ui_MainWindow):
             self._tabNumber = 1
             newIndex = self._addTab("Script #1")
             self.tabBar.setCurrentIndex(newIndex)
-
     def _shutdownWorker(self):
         self._worker.stop()
         self._thread.quit()
         self._thread.wait(3000)
-
     def _saveTabs(self):
         data = [self._tabNumber]
         for i in range(self.tabBar.count()):
@@ -457,10 +458,8 @@ class Window(QMainWindow, Ui_MainWindow):
                 self.tabBar.tabText(i),
                 editor.toPlainText() if editor is not None else ""
             ])
-
         with open(appData+'\\tabs.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps(data))
-
     def _clearTabs(self):
         if MessageBox.question(
                 'FunnyExecutor',
@@ -476,17 +475,13 @@ class Window(QMainWindow, Ui_MainWindow):
             self._tabNumber = 1
             newIndex = self._addTab("Script #1")
             self.tabBar.setCurrentIndex(newIndex)
-
     def _addTab(self, name=None, content=None):
         editor = CodeEditor(content)
-
         if name is None:
             self._tabNumber += 1
             name = f'Script #{self._tabNumber}'
-
         self.editorStack.addWidget(editor)
         return self.tabBar.addTab(name)
-
     def _loadTabs(self):
         if os.path.exists(appData+'\\tabs.json'):
             with open(appData+'\\tabs.json', 'r', encoding='utf-8') as f:
@@ -496,11 +491,9 @@ class Window(QMainWindow, Ui_MainWindow):
                     self._addTab(i[0], i[1])
         else:
             self._addTab()
-
         if self.tabBar.count() > 0:
             self.tabBar.setCurrentIndex(0)
             self.onTabChanged(0)
-
     def closeEvent(self, event):
         answer = MessageBox.question(
             "Quit",
@@ -513,31 +506,27 @@ class Window(QMainWindow, Ui_MainWindow):
             event.accept()
         else:
             event.ignore()
-
     def _getCurrentEditor(self):
         return self.editorStack.currentWidget()
-
 appData = os.environ['APPDATA']+'\\FunnyExecutor'
 scriptsDir = appData+'\\scripts'
 autoexecDir = appData+'\\autoexec'
 workspaceDir = appData+'\\workspace'
-
 if __name__ == '__main__':
-
     if not os.path.exists(appData):
         os.mkdir(appData)
-
     for sub in (scriptsDir, autoexecDir, workspaceDir):
         os.makedirs(sub, exist_ok=True)
-
     if os.path.exists('tabs.json'):
         shutil.copy('tabs.json', appData + '\\tabs.json')
         os.remove('tabs.json')
-
     sys.argv += ['-platform', 'windows:darkmode=2']
     app = QApplication(sys.argv)
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
-
+    appFont = QFont()
+    appFont.setFamilies([u"Inter", u"Segoe UI Variable Text", u"Segoe UI"])
+    appFont.setPointSize(10)
+    app.setFont(appFont)
     window = Window()
     app.aboutToQuit.connect(window._shutdownWorker)
     window.show()

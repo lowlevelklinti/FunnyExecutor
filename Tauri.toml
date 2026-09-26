@@ -1,0 +1,19 @@
+"$schema" = "https://schema.tauri.app/config/2"
+productName = "Funny Executor"
+version = "0.1.0"
+identifier = "com.funnyexecutor.app"
+
+[build]
+frontendDist = "frontend"
+
+[app]
+withGlobalTauri = true
+
+[[app.windows]]
+title = "Funny Executor"
+width = 1150
+height = 700
+minWidth = 900
+minHeight = 550
+decorations = false
+transparent = false
