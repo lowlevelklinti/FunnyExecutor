@@ -1,6 +1,7 @@
 local funnyexecutor = (function()
 -- // Environment changes in the VM are not supposed to alter the behaviour of the VM so we localise globals beforehand
 local type = type
+local typeof = typeof
 local pcall = pcall
 local error = error
 local tonumber = tonumber
@@ -748,6 +749,7 @@ end
 
 local gc_registry = setmetatable({}, {__mode = "k"})
 local closure_info = setmetatable({}, {__mode = "k"})
+local blockedNone = {}
 
 local function luau_load(module, env, luau_settings, isExecutorModule)
 	if luau_settings == nil then
@@ -776,6 +778,13 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 	local namecallHandler = luau_settings.namecallHandler
 	local useGeneralizedIteration = luau_settings.generalizedIteration
 	local useImportConstants = luau_settings.useImportConstants
+	local blockedMethods = luau_settings.blockedMethods or blockedNone
+
+	local function blockedProxy(className, method)
+		return function()
+			error("FunnyVM: " .. className .. ":" .. method .. " is blocked (lacking permission)", 0)
+		end
+	end
 
 	local yieldEnabled = luau_settings.cooperativeYield ~= false
 	local yieldBudget = if type(luau_settings.cooperativeYieldBudget) == "number" then luau_settings.cooperativeYieldBudget else defaultYieldBudget
@@ -874,131 +883,135 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					end
 				end
 
-				if op == 0 then --[[ NOP ]]
-					--// Do nun
-				elseif op == 1 then --[[ BREAK ]]
-					if breakHook then
-						local results = table_pack(breakHook(stack, debugging, proto, module, upvals))
-						
-						if results[1] then 
-							return table_unpack(results, 2, #results)
-						end 
-					end
-					
-					pc -= 1
-					op = code_op[pc]
-					handlingBreak = true
-				elseif op == 2 then --[[ LOADNIL ]]
-					stack[code_A[ipc]] = nil
-				elseif op == 3 then --[[ LOADB ]]
-					stack[code_A[ipc]] = code_B[ipc] == 1
-					pc += code_C[ipc]
-				elseif op == 4 then --[[ LOADN ]]
-					stack[code_A[ipc]] = code_D[ipc]
+				if op == 6 then --[[ MOVE ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]]
 				elseif op == 5 then --[[ LOADK ]]
 					stack[code_A[ipc]] = code_K[ipc]
-				elseif op == 6 then --[[ MOVE ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]]
-				elseif op == 7 then --[[ GETGLOBAL ]]
+				elseif op == 15 then --[[ GETTABLEKS ]]
+					local sb = stack[code_B[ipc]]
 					local kv = code_K[ipc]
 
-					stack[code_A[ipc]] = extensions[kv] or env[kv]
-
-					pc += 1 
-				elseif op == 8 then --[[ SETGLOBAL ]]
-					local kv = code_K[ipc]
-					env[kv] = stack[code_A[ipc]]
-
-					pc += 1 
-				elseif op == 9 then --[[ GETUPVAL ]]
-					local uv = upvals[code_B[ipc] + 1]
-					stack[code_A[ipc]] = uv.store[uv.index]
-				elseif op == 10 then --[[ SETUPVAL ]]
-					local uv = upvals[code_B[ipc] + 1]
-					uv.store[uv.index] = stack[code_A[ipc]]
-				elseif op == 11 then --[[ CLOSEUPVALS ]]
-					local target = code_A[ipc]
-					for i, uv in open_upvalues do
-						if uv.index >= target then
-							uv.value = uv.store[uv.index]
-							uv.store = uv
-							uv.index = "value" --// self reference
-							open_upvalues[i] = nil
+					local classSet = blockedMethods[kv]
+					if classSet ~= nil and typeof(sb) == "Instance" then
+						local className = sb.ClassName
+						if classSet[className] == true or classSet["*"] == true then
+							stack[code_A[ipc]] = blockedProxy(className, kv)
+						else
+							stack[code_A[ipc]] = sb[kv]
 						end
+					else
+						stack[code_A[ipc]] = sb[kv]
 					end
+
+					pc += 1 --// adjust for aux
 				elseif op == 12 then --[[ GETIMPORT ]]
-					if useImportConstants then
+					local cachedImport = code_K[ipc]
+
+					if cachedImport ~= nil then
+						stack[code_A[ipc]] = cachedImport
+					elseif useImportConstants then
 						stack[code_A[ipc]] = code_K[ipc]
 					else
 						local count = code_KC[ipc]
 						local k0 = code_K0[ipc]
 						local import = extensions[k0] or env[k0]
-						if count == 1 then
-							stack[code_A[ipc]] = import
-						elseif count == 2 then
-							stack[code_A[ipc]] = import[code_K1[ipc]]
+						if count == 2 then
+							local k1 = code_K1[ipc]
+							local classSet = blockedMethods[k1]
+							if classSet ~= nil and typeof(import) == "Instance" then
+								local className = import.ClassName
+								if classSet[className] == true or classSet["*"] == true then
+									import = blockedProxy(className, k1)
+								else
+									import = import[k1]
+								end
+							else
+								import = import[k1]
+							end
 						elseif count == 3 then
-							stack[code_A[ipc]] = import[code_K1[ipc]][code_K2[ipc]]
+							local k2 = code_K2[ipc]
+							local mid = import[code_K1[ipc]]
+							local classSet = blockedMethods[k2]
+							if classSet ~= nil and typeof(mid) == "Instance" then
+								local className = mid.ClassName
+								if classSet[className] == true or classSet["*"] == true then
+									import = blockedProxy(className, k2)
+								else
+									import = mid[k2]
+								end
+							else
+								import = mid[k2]
+							end
 						end
+						if import ~= nil then
+							code_K[ipc] = import
+						end
+						stack[code_A[ipc]] = import
 					end
 
-					pc += 1 --// adjust for aux 
-				elseif op == 13 then --[[ GETTABLE ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]][stack[code_C[ipc]]]
-				elseif op == 14 then --[[ SETTABLE ]]
-					stack[code_B[ipc]][stack[code_C[ipc]]] = stack[code_A[ipc]]
-				elseif op == 15 then --[[ GETTABLEKS ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]][code_K[ipc]]
-
-					pc += 1 --// adjust for aux 
-				elseif op == 16 then --[[ SETTABLEKS ]]
-					stack[code_B[ipc]][code_K[ipc]] = stack[code_A[ipc]]
-
 					pc += 1 --// adjust for aux
-				elseif op == 17 then --[[ GETTABLEN ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]][code_C[ipc] + 1]
-				elseif op == 18 then --[[ SETTABLEN ]]
-					stack[code_B[ipc]][code_C[ipc] + 1] = stack[code_A[ipc]]
-				elseif op == 19 then --[[ NEWCLOSURE ]]
-					local newPrototype = protolist[protos[code_D[ipc] + 1]]
+				elseif op == 21 then --[[ CALL ]]
+					if interruptHook then
+						interruptHook(stack, debugging, proto, module, upvals)	
+					end
 
-					local nups = newPrototype.nups
-					local upvalues = table_create(nups)
-					local closureObject = luau_wrapclosure(module, newPrototype, upvalues)
-					stack[code_A[ipc]] = closureObject
-					gc_registry[closureObject] = executorModule
-					closure_info[closureObject] = { proto = newPrototype, upvalues = upvalues, env = env, module = module, wrap = luau_wrapclosure }
+					local A, B, C = code_A[ipc], code_B[ipc], code_C[ipc]
 
-					for i = 1, nups do
-						local cap_A = code_A[pc]
-						local cap_B = code_B[pc]
+					local params = if B == 0 then top - A else B - 1
+					local func = stack[A]
 
-						pc += 1
+					if C == 1 then
+						-- 0 return values expected
+						func(table_unpack(stack, A + 1, A + params))
+					elseif C == 2 then
+						-- 1 return value expected
+						stack[A] = func(table_unpack(stack, A + 1, A + params))
+					elseif C == 3 then
+						-- 2 return values expected
+						stack[A], stack[A + 1] = func(table_unpack(stack, A + 1, A + params))
+					else
+						local ret_list = table_pack(
+							func(table_unpack(stack, A + 1, A + params))
+						)
 
-						if cap_A == 0 then --// value
-							local upvalue = {
-								value = stack[cap_B],
-								index = "value",--// self reference
-							}
-							upvalue.store = upvalue
+						local ret_num = ret_list.n
 
-							upvalues[i] = upvalue
-						elseif cap_A == 1 then --// reference
-							local index = cap_B
-							local prev = open_upvalues[index]
-
-							if prev == nil then
-								prev = {
-									index = index,
-									store = stack,
-								}
-								open_upvalues[index] = prev
-							end
-
-							upvalues[i] = prev
-						elseif cap_A == 2 then --// upvalue
-							upvalues[i] = upvals[cap_B + 1]
+						if C == 0 then
+							top = A + ret_num - 1
+						else
+							ret_num = C - 1
 						end
+
+						table_move(ret_list, 1, ret_num, A, stack)
+					end
+				elseif op == 22 then --[[ RETURN ]]
+					if interruptHook then
+						interruptHook(stack, debugging, proto, module, upvals)	
+					end
+
+					local A = code_A[ipc]
+					local B = code_B[ipc]
+
+					if B == 1 then
+						-- 0 return values
+						return
+					elseif B == 2 then
+						-- 1 return value
+						return stack[A]
+					elseif B == 3 then
+						-- 2 return values
+						return stack[A], stack[A + 1]
+					elseif B == 4 then
+						-- 3 return values
+						return stack[A], stack[A + 1], stack[A + 2]
+					else
+						local nresults
+						if B == 0 then
+							nresults = top - A + 1
+						else
+							nresults = B - 1
+						end
+						return table_unpack(stack, A, A + nresults - 1)
 					end
 				elseif op == 20 then --[[ NAMECALL ]]
 					local A = code_A[ipc]
@@ -1078,76 +1091,7 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					if useFallback then
 						stack[A] = sb[kv]
 					end
-				elseif op == 21 then --[[ CALL ]]
-					if interruptHook then
-						interruptHook(stack, debugging, proto, module, upvals)	
-					end
-
-					local A, B, C = code_A[ipc], code_B[ipc], code_C[ipc]
-
-					local params = if B == 0 then top - A else B - 1
-					local func = stack[A]
-
-					if C == 1 then
-						-- 0 return values expected
-						func(table_unpack(stack, A + 1, A + params))
-					elseif C == 2 then
-						-- 1 return value expected
-						stack[A] = func(table_unpack(stack, A + 1, A + params))
-					elseif C == 3 then
-						-- 2 return values expected
-						stack[A], stack[A + 1] = func(table_unpack(stack, A + 1, A + params))
-					else
-						local ret_list = table_pack(
-							func(table_unpack(stack, A + 1, A + params))
-						)
-
-						local ret_num = ret_list.n
-
-						if C == 0 then
-							top = A + ret_num - 1
-						else
-							ret_num = C - 1
-						end
-
-						table_move(ret_list, 1, ret_num, A, stack)
-					end
-				elseif op == 22 then --[[ RETURN ]]
-					if interruptHook then
-						interruptHook(stack, debugging, proto, module, upvals)	
-					end
-
-					local A = code_A[ipc]
-					local B = code_B[ipc]
-
-					if B == 1 then
-						-- 0 return values
-						return
-					elseif B == 2 then
-						-- 1 return value
-						return stack[A]
-					elseif B == 3 then
-						-- 2 return values
-						return stack[A], stack[A + 1]
-					elseif B == 4 then
-						-- 3 return values
-						return stack[A], stack[A + 1], stack[A + 2]
-					else
-						local nresults
-						if B == 0 then
-							nresults = top - A + 1
-						else
-							nresults = B - 1
-						end
-						return table_unpack(stack, A, A + nresults - 1)
-					end
 				elseif op == 23 then --[[ JUMP ]]
-					pc += code_D[ipc]
-				elseif op == 24 then --[[ JUMPBACK ]]
-					if interruptHook then
-						interruptHook(stack, debugging, proto, module, upvals)	
-					end
-
 					pc += code_D[ipc]
 				elseif op == 25 then --[[ JUMPIF ]]
 					if stack[code_A[ipc]] then
@@ -1157,42 +1101,38 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					if not stack[code_A[ipc]] then
 						pc += code_D[ipc]
 					end
-				elseif op == 27 then --[[ JUMPIFEQ ]]
-					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
-						pc += code_D[ipc]
+				elseif op == 4 then --[[ LOADN ]]
+					stack[code_A[ipc]] = code_D[ipc]
+				elseif op == 2 then --[[ LOADNIL ]]
+					stack[code_A[ipc]] = nil
+				elseif op == 3 then --[[ LOADB ]]
+					stack[code_A[ipc]] = code_B[ipc] == 1
+					pc += code_C[ipc]
+				elseif op == 16 then --[[ SETTABLEKS ]]
+					stack[code_B[ipc]][code_K[ipc]] = stack[code_A[ipc]]
+
+					pc += 1 --// adjust for aux
+				elseif op == 13 then --[[ GETTABLE ]]
+					local sb = stack[code_B[ipc]]
+					local key = stack[code_C[ipc]]
+
+					local classSet = ttisstring(key) and blockedMethods[key] or nil
+					if classSet ~= nil and typeof(sb) == "Instance" then
+						local className = sb.ClassName
+						if classSet[className] == true or classSet["*"] == true then
+							stack[code_A[ipc]] = blockedProxy(className, key)
+						else
+							stack[code_A[ipc]] = sb[key]
+						end
 					else
-						pc += 1
+						stack[code_A[ipc]] = sb[key]
 					end
-				elseif op == 28 then --[[ JUMPIFLE ]]
-					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
-						pc += code_D[ipc]
-					else
-						pc += 1
-					end
-				elseif op == 29 then --[[ JUMPIFLT ]]
-					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
-						pc += code_D[ipc]
-					else
-						pc += 1
-					end
-				elseif op == 30 then --[[ JUMPIFNOTEQ ]]
-					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
-						pc += 1
-					else
-						pc += code_D[ipc]
-					end
-				elseif op == 31 then --[[ JUMPIFNOTLE ]]
-					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
-						pc += 1
-					else
-						pc += code_D[ipc]
-					end
-				elseif op == 32 then --[[ JUMPIFNOTLT ]]
-					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
-						pc += 1
-					else
-						pc += code_D[ipc]
-					end
+				elseif op == 14 then --[[ SETTABLE ]]
+					stack[code_B[ipc]][stack[code_C[ipc]]] = stack[code_A[ipc]]
+				elseif op == 17 then --[[ GETTABLEN ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]][code_C[ipc] + 1]
+				elseif op == 18 then --[[ SETTABLEN ]]
+					stack[code_B[ipc]][code_C[ipc] + 1] = stack[code_A[ipc]]
 				elseif op == 33 then --[[ ADD ]]
 					stack[code_A[ipc]] = stack[code_B[ipc]] + stack[code_C[ipc]]
 				elseif op == 34 then --[[ SUB ]]
@@ -1201,10 +1141,6 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					stack[code_A[ipc]] = stack[code_B[ipc]] * stack[code_C[ipc]]
 				elseif op == 36 then --[[ DIV ]]
 					stack[code_A[ipc]] = stack[code_B[ipc]] / stack[code_C[ipc]]
-				elseif op == 37 then --[[ MOD ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] % stack[code_C[ipc]]
-				elseif op == 38 then --[[ POW ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] ^ stack[code_C[ipc]]
 				elseif op == 39 then --[[ ADDK ]]
 					stack[code_A[ipc]] = stack[code_B[ipc]] + code_K[ipc]
 				elseif op == 40 then --[[ SUBK ]]
@@ -1213,67 +1149,6 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					stack[code_A[ipc]] = stack[code_B[ipc]] * code_K[ipc]
 				elseif op == 42 then --[[ DIVK ]]
 					stack[code_A[ipc]] = stack[code_B[ipc]] / code_K[ipc]
-				elseif op == 43 then --[[ MODK ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] % code_K[ipc]
-				elseif op == 44 then --[[ POWK ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] ^ code_K[ipc]
-				elseif op == 45 then --[[ AND ]]
-					local value = stack[code_B[ipc]]
-					stack[code_A[ipc]] = if value then stack[code_C[ipc]] or false else value
-				elseif op == 46 then --[[ OR ]]
-					local value = stack[code_B[ipc]]
-					stack[code_A[ipc]] = if value then value else stack[code_C[ipc]] or false
-				elseif op == 47 then --[[ ANDK ]]
-					local value = stack[code_B[ipc]]
-					stack[code_A[ipc]] = if value then code_K[ipc] or false else value
-				elseif op == 48 then --[[ ORK ]]
-					local value = stack[code_B[ipc]]
-					stack[code_A[ipc]] = if value then value else code_K[ipc] or false
-				elseif op == 49 then --[[ CONCAT ]]
-					local B, C = code_B[ipc], code_C[ipc]
-					local success, s = pcall(table_concat, stack, "", B, C)
-	
-					if not success then
-						s = stack[B]
-	
-						for i = B + 1, C do
-							s ..= stack[i]
-						end
-					end
-
-					stack[code_A[ipc]] = s
-				elseif op == 50 then --[[ NOT ]]
-					stack[code_A[ipc]] = not stack[code_B[ipc]]
-				elseif op == 51 then --[[ MINUS ]]
-					stack[code_A[ipc]] = -stack[code_B[ipc]]
-				elseif op == 52 then --[[ LENGTH ]]
-					stack[code_A[ipc]] = #stack[code_B[ipc]]
-				elseif op == 53 then --[[ NEWTABLE ]]
-					local newTable = table_create(code_aux[ipc])
-					stack[code_A[ipc]] = newTable
-					gc_registry[newTable] = executorModule
-
-					pc += 1 --// adjust for aux 
-				elseif op == 54 then --[[ DUPTABLE ]]
-					local template = code_K[ipc]
-					local serialized = {}
-					for _, id in template do
-						serialized[constants[id + 1]] = nil
-					end
-					stack[code_A[ipc]] = serialized
-					gc_registry[serialized] = executorModule
-				elseif op == 55 then --[[ SETLIST ]]
-					local A = code_A[ipc]
-					local B = code_B[ipc]
-					local c = code_C[ipc] - 1
-
-					if c == LUA_MULTRET then
-						c = top - B + 1
-					end
-
-					table_move(stack, B, B + c - 1, code_aux[ipc], stack[A])
-
-					pc += 1 --// adjust for aux 
 				elseif op == 56 then --[[ FORNPREP ]]
 					local A = code_A[ipc]
 
@@ -1380,30 +1255,20 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 							pc += code_D[ipc]
 						end
 					end
-				elseif op == 59 then --[[ FORGPREP_INEXT ]]
-					if not ttisfunction(stack[code_A[ipc]]) then
-						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_INEXT encountered non-function value
+				elseif op == 53 then --[[ NEWTABLE ]]
+					local newTable = table_create(code_aux[ipc])
+					stack[code_A[ipc]] = newTable
+					gc_registry[newTable] = executorModule
+
+					pc += 1 --// adjust for aux 
+				elseif op == 54 then --[[ DUPTABLE ]]
+					local template = code_K[ipc]
+					local serialized = {}
+					for _, id in template do
+						serialized[constants[id + 1]] = nil
 					end
-
-					pc += code_D[ipc]
-				elseif op == 60 then --[[ FASTCALL3 ]]
-					pc += 1 --// adjust for aux
-				elseif op == 61 then --[[ FORGPREP_NEXT ]]
-					if not ttisfunction(stack[code_A[ipc]]) then
-						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_NEXT encountered non-function value
-					end
-
-					pc += code_D[ipc]
-				elseif op == 63 then --[[ GETVARARGS ]]
-					local A = code_A[ipc]
-					local b = code_B[ipc] - 1
-
-					if b == LUA_MULTRET then
-						b = varargs.len
-						top = A + b - 1
-					end
-
-					table_move(varargs.list, 1, b, A, stack)
+					stack[code_A[ipc]] = serialized
+					gc_registry[serialized] = executorModule
 				elseif op == 64 then --[[ DUPCLOSURE ]]
 					local newPrototype = protolist[code_K[ipc] + 1]
 
@@ -1432,33 +1297,176 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 							upvalues[i] = upvals[cap_B + 1]
 						end
 					end
-				elseif op == 65 then --[[ PREPVARARGS ]]
-					--[[ Handled by wrapper ]]
-				elseif op == 66 then --[[ LOADKX ]]
-					stack[code_A[ipc]] = code_K[ipc]
+				elseif op == 19 then --[[ NEWCLOSURE ]]
+					local newPrototype = protolist[protos[code_D[ipc] + 1]]
 
-					pc += 1 --// adjust for aux 
-				elseif op == 67 then --[[ JUMPX ]]
+					local nups = newPrototype.nups
+					local upvalues = table_create(nups)
+					local closureObject = luau_wrapclosure(module, newPrototype, upvalues)
+					stack[code_A[ipc]] = closureObject
+					gc_registry[closureObject] = executorModule
+					closure_info[closureObject] = { proto = newPrototype, upvalues = upvalues, env = env, module = module, wrap = luau_wrapclosure }
+
+					for i = 1, nups do
+						local cap_A = code_A[pc]
+						local cap_B = code_B[pc]
+
+						pc += 1
+
+						if cap_A == 0 then --// value
+							local upvalue = {
+								value = stack[cap_B],
+								index = "value",--// self reference
+							}
+							upvalue.store = upvalue
+
+							upvalues[i] = upvalue
+						elseif cap_A == 1 then --// reference
+							local index = cap_B
+							local prev = open_upvalues[index]
+
+							if prev == nil then
+								prev = {
+									index = index,
+									store = stack,
+								}
+								open_upvalues[index] = prev
+							end
+
+							upvalues[i] = prev
+						elseif cap_A == 2 then --// upvalue
+							upvalues[i] = upvals[cap_B + 1]
+						end
+					end
+				elseif op == 63 then --[[ GETVARARGS ]]
+					local A = code_A[ipc]
+					local b = code_B[ipc] - 1
+
+					if b == LUA_MULTRET then
+						b = varargs.len
+						top = A + b - 1
+					end
+
+					table_move(varargs.list, 1, b, A, stack)
+				elseif op == 52 then --[[ LENGTH ]]
+					stack[code_A[ipc]] = #stack[code_B[ipc]]
+				elseif op == 49 then --[[ CONCAT ]]
+					local B, C = code_B[ipc], code_C[ipc]
+					local success, s = pcall(table_concat, stack, "", B, C)
+	
+					if not success then
+						s = stack[B]
+	
+						for i = B + 1, C do
+							s ..= stack[i]
+						end
+					end
+
+					stack[code_A[ipc]] = s
+				elseif op == 50 then --[[ NOT ]]
+					stack[code_A[ipc]] = not stack[code_B[ipc]]
+				elseif op == 51 then --[[ MINUS ]]
+					stack[code_A[ipc]] = -stack[code_B[ipc]]
+				elseif op == 45 then --[[ AND ]]
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then stack[code_C[ipc]] or false else value
+				elseif op == 46 then --[[ OR ]]
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then value else stack[code_C[ipc]] or false
+				elseif op == 47 then --[[ ANDK ]]
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then code_K[ipc] or false else value
+				elseif op == 48 then --[[ ORK ]]
+					local value = stack[code_B[ipc]]
+					stack[code_A[ipc]] = if value then value else code_K[ipc] or false
+				elseif op == 9 then --[[ GETUPVAL ]]
+					local uv = upvals[code_B[ipc] + 1]
+					stack[code_A[ipc]] = uv.store[uv.index]
+				elseif op == 10 then --[[ SETUPVAL ]]
+					local uv = upvals[code_B[ipc] + 1]
+					uv.store[uv.index] = stack[code_A[ipc]]
+				elseif op == 24 then --[[ JUMPBACK ]]
 					if interruptHook then
 						interruptHook(stack, debugging, proto, module, upvals)	
 					end
 
-					pc += code_E[ipc]
-				elseif op == 68 then --[[ FASTCALL ]]
-				elseif op == 69 then --[[ COVERAGE ]]
-					code_E[ipc] = (code_E[ipc] or 0) + 1
-				elseif op == 70 then --[[ CAPTURE ]]
-					--[[ Handled by CLOSURE ]]
-					error("encountered unhandled CAPTURE")
+					pc += code_D[ipc]
+				elseif op == 27 then --[[ JUMPIFEQ ]]
+					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
+						pc += code_D[ipc]
+					else
+						pc += 1
+					end
+				elseif op == 30 then --[[ JUMPIFNOTEQ ]]
+					if stack[code_A[ipc]] == stack[code_aux[ipc]] then
+						pc += 1
+					else
+						pc += code_D[ipc]
+					end
+				elseif op == 28 then --[[ JUMPIFLE ]]
+					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
+						pc += code_D[ipc]
+					else
+						pc += 1
+					end
+				elseif op == 31 then --[[ JUMPIFNOTLE ]]
+					if stack[code_A[ipc]] <= stack[code_aux[ipc]] then
+						pc += 1
+					else
+						pc += code_D[ipc]
+					end
+				elseif op == 29 then --[[ JUMPIFLT ]]
+					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
+						pc += code_D[ipc]
+					else
+						pc += 1
+					end
+				elseif op == 32 then --[[ JUMPIFNOTLT ]]
+					if stack[code_A[ipc]] < stack[code_aux[ipc]] then
+						pc += 1
+					else
+						pc += code_D[ipc]
+					end
+				elseif op == 37 then --[[ MOD ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] % stack[code_C[ipc]]
+				elseif op == 38 then --[[ POW ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] ^ stack[code_C[ipc]]
+				elseif op == 43 then --[[ MODK ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] % code_K[ipc]
+				elseif op == 44 then --[[ POWK ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] ^ code_K[ipc]
 				elseif op == 71 then --[[ SUBRK ]]
 					stack[code_A[ipc]] = code_K[ipc] - stack[code_C[ipc]]
 				elseif op == 72 then --[[ DIVRK ]]
 					stack[code_A[ipc]] = code_K[ipc] / stack[code_C[ipc]]
-				elseif op == 73 then --[[ FASTCALL1 ]]
-				elseif op == 74 then --[[ FASTCALL2 ]]
-					pc += 1 --// adjust for aux
-				elseif op == 75 then --[[ FASTCALL2K ]]
-					pc += 1 --// adjust for aux
+				elseif op == 81 then --[[ IDIV ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] // stack[code_C[ipc]]
+				elseif op == 82 then --[[ IDIVK ]]
+					stack[code_A[ipc]] = stack[code_B[ipc]] // code_K[ipc]
+				elseif op == 55 then --[[ SETLIST ]]
+					local A = code_A[ipc]
+					local B = code_B[ipc]
+					local c = code_C[ipc] - 1
+
+					if c == LUA_MULTRET then
+						c = top - B + 1
+					end
+
+					table_move(stack, B, B + c - 1, code_aux[ipc], stack[A])
+
+					pc += 1 --// adjust for aux 
+				elseif op == 59 then --[[ FORGPREP_INEXT ]]
+					if not ttisfunction(stack[code_A[ipc]]) then
+						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_INEXT encountered non-function value
+					end
+
+					pc += code_D[ipc]
+				elseif op == 61 then --[[ FORGPREP_NEXT ]]
+					if not ttisfunction(stack[code_A[ipc]]) then
+						error(string_format("attempt to iterate over a %s value", type(stack[code_A[ipc]]))) -- FORGPREP_NEXT encountered non-function value
+					end
+
+					pc += code_D[ipc]
 				elseif op == 76 then --[[ FORGPREP ]]
 					local iterator = stack[code_A[ipc]]
 
@@ -1478,6 +1486,27 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					end
 
 					pc += code_D[ipc]
+				elseif op == 7 then --[[ GETGLOBAL ]]
+					local kv = code_K[ipc]
+
+					stack[code_A[ipc]] = extensions[kv] or env[kv]
+
+					pc += 1 
+				elseif op == 8 then --[[ SETGLOBAL ]]
+					local kv = code_K[ipc]
+					env[kv] = stack[code_A[ipc]]
+
+					pc += 1 
+				elseif op == 66 then --[[ LOADKX ]]
+					stack[code_A[ipc]] = code_K[ipc]
+
+					pc += 1 --// adjust for aux 
+				elseif op == 67 then --[[ JUMPX ]]
+					if interruptHook then
+						interruptHook(stack, debugging, proto, module, upvals)	
+					end
+
+					pc += code_E[ipc]
 				elseif op == 77 then --[[ JUMPXEQKNIL ]]
 					local kn = code_KN[ipc]
 
@@ -1516,10 +1545,45 @@ local function luau_load(module, env, luau_settings, isExecutorModule)
 					else
 						pc += 1
 					end
-				elseif op == 81 then --[[ IDIV ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] // stack[code_C[ipc]]
-				elseif op == 82 then --[[ IDIVK ]]
-					stack[code_A[ipc]] = stack[code_B[ipc]] // code_K[ipc]
+				elseif op == 65 then --[[ PREPVARARGS ]]
+					--[[ Handled by wrapper ]]
+				elseif op == 11 then --[[ CLOSEUPVALS ]]
+					local target = code_A[ipc]
+					for i, uv in open_upvalues do
+						if uv.index >= target then
+							uv.value = uv.store[uv.index]
+							uv.store = uv
+							uv.index = "value" --// self reference
+							open_upvalues[i] = nil
+						end
+					end
+				elseif op == 68 then --[[ FASTCALL ]]
+				elseif op == 73 then --[[ FASTCALL1 ]]
+				elseif op == 74 then --[[ FASTCALL2 ]]
+					pc += 1 --// adjust for aux
+				elseif op == 75 then --[[ FASTCALL2K ]]
+					pc += 1 --// adjust for aux
+				elseif op == 60 then --[[ FASTCALL3 ]]
+					pc += 1 --// adjust for aux
+				elseif op == 69 then --[[ COVERAGE ]]
+					code_E[ipc] = (code_E[ipc] or 0) + 1
+				elseif op == 70 then --[[ CAPTURE ]]
+					--[[ Handled by CLOSURE ]]
+					error("encountered unhandled CAPTURE")
+				elseif op == 1 then --[[ BREAK ]]
+					if breakHook then
+						local results = table_pack(breakHook(stack, debugging, proto, module, upvals))
+						
+						if results[1] then 
+							return table_unpack(results, 2, #results)
+						end 
+					end
+					
+					pc -= 1
+					op = code_op[pc]
+					handlingBreak = true
+				elseif op == 0 then --[[ NOP ]]
+					--// Do nun
 				else
 					local opname = opList[op + 1]
 					error("Unsupported Opcode: " .. (opname and opname[1] or "?") .. " op: " .. op)
@@ -1667,7 +1731,27 @@ __funny_service_cache = service_cache
 __funny_gc_registry = funnyexecutor.gcRegistry
 __funny_closure_info = funnyexecutor.closureInfo
 
+local blocked_methods = {}
+__funny_blocked_methods = blocked_methods
+
+local function assert_url_allowed(url)
+	local lower = string.lower(tostring(url))
+
+	if string.sub(lower, 1, 7) == "file://" then
+		error("FunnyVM: file:// URLs are not allowed", 0)
+	end
+
+	local host = string.match(lower, "^%a+://([^/]+)") or ""
+	host = string.gsub(host, ":%d+$", "")
+
+	if host == "roblox.com" or string.sub(host, -11) == ".roblox.com" then
+		error("FunnyVM: requests to Roblox domains are blocked", 0)
+	end
+end
+
 local function http_get(url)
+	assert_url_allowed(url)
+
 	local result = nil
 
 	local ok = pcall(function()
@@ -1708,9 +1792,22 @@ local function namecall_handler(method, self, ...)
 		return false
 	end
 
+	if typeof(self) == "Instance" then
+		local classSet = blocked_methods[method]
+		if classSet ~= nil then
+			local className = self.ClassName
+			if classSet[className] == true or classSet["*"] == true then
+				error("FunnyVM: " .. className .. ":" .. method .. " is blocked (lacking permission)", 0)
+			end
+		end
+	end
+
 	if self == game then
 		if method == "HttpGet" or method == "HttpGetAsync" then
 			return true, http_get(...)
+		elseif method == "HttpPost" or method == "HttpPostAsync" then
+			assert_url_allowed((...))
+			return false
 		elseif method == "GetService" then
 			local name = ...
 			local cached = service_cache[name]
@@ -1739,6 +1836,7 @@ load_bytecode = function(bytecode, env, isExecutorModule)
 	settings.vectorCtor = Vector3.new
 	settings.useNativeNamecall = true
 	settings.namecallHandler = namecall_handler
+	settings.blockedMethods = blocked_methods
 
 	return (funnyexecutor.luau_load(bytecode, env or getfenv(), settings, isExecutorModule))
 end

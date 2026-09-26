@@ -53,6 +53,7 @@ class Executor:
         self.strval = None
         self._injecting = False
         self._handledDms = set()
+        self._updAddr = None
 
     @property
     def injected(self):
@@ -87,6 +88,7 @@ class Executor:
             return
 
         self._injecting = True
+        self._updAddr = None
         try:
             print('Injecting')
             if not psutil.pid_exists(self.sdk.mem.process_id):
@@ -123,7 +125,6 @@ class Executor:
 
             with open(luauModules / 'init.bin', 'rb') as f:
                 bytecode = f.read()
-            print(bytecode)
 
             revert = plm.exploit(bytecode)
 
@@ -163,17 +164,19 @@ class Executor:
 
         rbx = self.sdk
         game = rbx.datamodel
+        updAddr = self._updAddr
 
-        coreGui: sdk.Instance = game.findFirstChild('CoreGui')
-        root: sdk.Instance = coreGui.findFirstChild('_funnyexecutor')
-
-        if root is None:
-            raise ExecutionError("Failed to get instances neccessary for execution (has injection failed?)")
-
-        updateIndicator: sdk.BoolValue = root.findFirstChild('UpdateIndicator')
+        if updAddr is None or updAddr[0] != game.address:
+            coreGui: sdk.Instance = game.findFirstChild('CoreGui')
+            root: sdk.Instance = coreGui.findFirstChild('_funnyexecutor') if coreGui else None
+            updateIndicator: sdk.BoolValue = root.findFirstChild('UpdateIndicator')
+            updAddr = (game.address, updateIndicator.address)
+            self._updAddr = updAddr
 
         bridge.setSource(Luau.compile(source))
-        updateIndicator.setValue(not updateIndicator.getValue())
+
+        valueAddr = updAddr[1] + rbx.offsets.value
+        rbx.mem.write_bool(valueAddr, not rbx.mem.read_bool(valueAddr))
 
         print("Executed")
 

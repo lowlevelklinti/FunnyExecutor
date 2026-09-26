@@ -14,6 +14,29 @@ local http = game.HttpService
 local lastValue = upd.Value
 local bridgeServer = 'http://127.0.0.1:9475'
 
+if __funny_blocked_methods then
+	local function blockMethods(className, methods)
+		for _, method in ipairs(methods) do
+			local classSet = __funny_blocked_methods[method]
+			if classSet == nil then
+				classSet = {}
+				__funny_blocked_methods[method] = classSet
+			end
+			classSet[className] = true
+		end
+	end
+
+	blockMethods("DataModel", {"OpenScreenshotsFolder", "OpenVideosFolder"})
+	blockMethods("CaptureService", {"RetrieveCaptures", "SaveScreenshotCapture"})
+	blockMethods("BrowserService", {"OpenWeChatAuthWindow"})
+	blockMethods("AvatarEditorService", {"PerformSetFavorite", "PromptAllowInventoryReadAccess", "SignalCreateOutfitFailed", "SignalCreateOutfitPermissionDenied", "SignalDeleteOutfitFailed", "SignalDeleteOutfitPermissionDenied", "SignalRenameOutfitFailed", "SignalRenameOutfitPermissionDenied", "SignalSaveAvatarPermissionDenied", "SignalSetFavoriteFailed", "SignalSetFavoritePermissionDenied", "SignalUpdateOutfitFailed", "SignalUpdateOutfitPermissionDenied"})
+	blockMethods("MarketplaceService", {"GetRobuxBalance"})
+	blockMethods("CoreGui", {"TakeScreenshot", "ToggleRecording"})
+	blockMethods("LinkingService", {"StartLuaUrlDelivery", "StopLuaUrlDelivery", "GetLastLuaUrl", "GetAndClearLastPendingUrl", "SwitchToSettingsApp", "SupportsSwitchToSettingsApp"})
+	blockMethods("AppUpdateService", {"PerformManagedUpdate"})
+	blockMethods("AccountService", {"GetCredentialsHeaders", "GetDeviceAccessToken"})
+end
+
 -- modules
 
 local lz4 do
@@ -1279,7 +1302,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'Funny Executor', 'v0.555'
+	return 'Funny Executor', 'v0.565'
 end
 
 getexecutorname = function()
