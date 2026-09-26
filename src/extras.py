@@ -1,6 +1,10 @@
 import re
+import time
+import threading
+import requests
+from pathlib import Path
 
-from PySide6.QtCore import QRegularExpression, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QRegularExpression, QRect, QSize, Qt, QTimer, Property, QPropertyAnimation, QEasingCurve, Signal
 from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QPainter
 from PySide6.QtWidgets import QPlainTextEdit, QMessageBox, QWidget
 
@@ -570,3 +574,229 @@ class MessageBox:
     @staticmethod
     def information(title, text, options=QMessageBox.StandardButton.Ok):
         return msgb(QMessageBox.Icon.Information, title, text, options)
+
+
+class Switch(QWidget):
+    toggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self._position = 0.0
+        self.setFixedSize(44, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._anim = QPropertyAnimation(self, b"position", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def getPosition(self):
+        return self._position
+
+    def setPosition(self, value):
+        self._position = value
+        self.update()
+
+    position = Property(float, getPosition, setPosition)
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, checked):
+        if self._checked == checked:
+            return
+        self._checked = checked
+        self._anim.stop()
+        self._anim.setStartValue(self._position)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def toggle(self):
+        self.setChecked(not self._checked)
+
+    def setEnabled(self, enabled):
+        super().setEnabled(enabled)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if not self.isEnabled():
+            return
+        self.toggle()
+        self.toggled.emit(self._checked)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        h = self.height()
+        r = h / 2
+        if not self.isEnabled():
+            trackColor = QColor("#232323")
+        elif self._checked:
+            trackColor = QColor("#4f7cff")
+        else:
+            trackColor = QColor("#2a2a2a")
+        painter.setBrush(trackColor)
+        painter.drawRoundedRect(0, 0, self.width(), h, r, r)
+
+        knobDiameter = h - 6
+        maxX = self.width() - knobDiameter - 3
+        x = int(self._position * maxX) + 3
+        y = (h - knobDiameter) // 2
+        painter.setBrush(QColor("#ffffff") if self.isEnabled() else QColor("#5a5a5a"))
+        painter.drawEllipse(x, y, knobDiameter, knobDiameter)
+
+
+
+discordInv = "https://discord.gg/e9Ru9nuSyv"
+
+
+def dbg(msg):
+        print(f"{msg}")
+
+
+def discordPresent():
+    try:
+        import psutil
+    except Exception:
+        return False
+
+    try:
+        for proc in psutil.process_iter(['name']):
+            try:
+                name = (proc.name() or "").lower()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if name.startswith("discord"):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def updateRpc(rpc, gameInfo=None):
+    if rpc is None:
+        return
+    try:
+        rpc.update(
+            state="Using Funny Executor",
+            details="Skidding",
+            large_image="logo",
+            large_text="Funny Executor",
+            buttons=[
+                {"label": "Join Discord Server", "url": discordInv},
+                {"label": "Download", "url": "https://github.com"},
+            ],
+        )
+    except Exception as e:
+        dbg(f"rpc update failed: {e}")
+
+
+class RpcManager:
+    def __init__(self, clientId, pollInterval=5.0):
+        self.clientId = clientId
+        self.pollInterval = pollInterval
+        self._running = False
+        self._enabled = False
+        self._connected = False
+        self._rpc = None
+        self._thread = None
+        self._lastGameId = None
+        self._scriptExecuted = False
+        self._lastGameSeen = None
+        self._worker = None
+
+    def setExecutor(self, worker):
+        self._worker = worker
+
+    def discordPresent(self):
+        return discordPresent()
+
+    def _ensureConnection(self):
+        if self._connected and self._rpc is not None:
+            return True
+        try:
+            from pypresence import Presence
+            self._rpc = Presence(self.clientId)
+            self._rpc.connect()
+            self._connected = True
+            dbg("connected to Discord RPC")
+            return True
+        except Exception as e:
+            dbg(f"Discord RPC connect failed: {e}")
+            self._rpc = None
+            self._connected = False
+            return False
+
+    def _disconnect(self):
+        if self._rpc is not None:
+            try:
+                self._rpc.clear()
+            except Exception:
+                pass
+            try:
+                self._rpc.close()
+            except Exception:
+                pass
+        self._rpc = None
+        self._connected = False
+
+    def setEnabled(self, enabled):
+        if enabled and not discordPresent():
+            dbg("Discord not detected, leaving RPC disabled")
+            self._enabled = False
+            return
+
+        self._enabled = enabled
+
+        self._scriptExecuted = False
+        self._lastGameId = None
+        try:
+            from FAPI import bridge
+            bridge.game_state = {}
+        except Exception:
+            pass
+
+    def isEnabled(self):
+        return self._enabled
+
+    def clear(self):
+        if self._rpc is not None:
+            try:
+                self._rpc.clear()
+            except Exception:
+                pass
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._pollLoop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=self.pollInterval + 1)
+        self.clear()
+        self._disconnect()
+
+    def _pollLoop(self):
+        while self._running:
+            try:
+                if not self._enabled:
+                    if self._connected:
+                        self.clear()
+                        self._disconnect()
+                    time.sleep(1)
+                    continue
+
+                if not self._connected:
+                    if not self._ensureConnection():
+                        time.sleep(2)
+                        continue
+                    updateRpc(self._rpc, None)
+            except Exception as e:
+                dbg(f"poll error: {e}")
+
+            time.sleep(self.pollInterval)

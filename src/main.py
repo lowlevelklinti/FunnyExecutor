@@ -9,27 +9,14 @@ from design import Ui_MainWindow, Icons, svgIcon, navIcon
 
 from PySide6.QtCore import QTimer, Qt, QThread, QObject, Signal, Slot, QEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QSizeGrip, QTreeWidgetItem
-from extras import CodeEditor, MessageBox
+from extras import CodeEditor, MessageBox, RpcManager
 
 import FAPI
-from rpc.rpc_manager import RpcManager
 
 navDim = "#8a8a8a"
 navActive = "#e6e6e6"
 
 CLIENT_ID = "1553410003417960469"
-
-from pypresence import Presence
-
-rpc = Presence(CLIENT_ID)
-rpc.connect()
-
-rpc.update(
-    state="In Funny Executor",
-    details="Idling",
-    large_image="logo",
-    large_text="Funny Executor",
-)
 
 class RobloxWorker(QObject):
     statusChanged = Signal(str)
@@ -192,6 +179,7 @@ class Window(QMainWindow, Ui_MainWindow):
         self.iconRail.installEventFilter(self)
         self.breadcrumb.installEventFilter(self)
         self.tabStrip.installEventFilter(self)
+        self.topBar.installEventFilter(self)
 
         self._thread = QThread(self)
         self._worker = RobloxWorker()
@@ -257,20 +245,28 @@ class Window(QMainWindow, Ui_MainWindow):
 
         self._thread.start()
 
-        # RPC: connect to worker so game info script runs through the injected executor
-        self._rpcManager = RpcManager(rpc, poll_interval=5.0)
+        self._rpcManager = RpcManager(CLIENT_ID, pollInterval=5.0)
         self._rpcManager.setExecutor(self._worker)
-        self._rpcManager.start()
 
-        # RPC toggle in settings
-        self.rpcCheckBox.toggled.connect(self._rpcManager.setEnabled)
+        discord_ok = self._rpcManager.discordPresent()
+        settings = self._loadSettings()
+        rpc_enabled = bool(settings.get('rpcEnabled', False)) and discord_ok
+        self.rpcSwitch.setEnabled(discord_ok)
+        self.rpcSwitch.toggled.connect(self._onRpcToggled)
+        self.rpcSwitch.setChecked(rpc_enabled)
+        if discord_ok:
+            self.rpcSwitch.setToolTip("Show what you're doing on Discord")
+        else:
+            self.rpcSwitch.setToolTip("Discord not detected — start Discord to enable Rich Presence")
+        self._rpcManager.setEnabled(rpc_enabled)
+        self._rpcManager.start()
 
         self._autosaveTimer = QTimer(self)
         self._autosaveTimer.timeout.connect(self._saveTabs)
         self._autosaveTimer.start(10000)
 
     def eventFilter(self, obj, event):
-        if obj in (self.iconRail, self.breadcrumb, self.tabStrip) and event.type() == QEvent.Type.MouseButtonPress:
+        if obj in (self.iconRail, self.breadcrumb, self.tabStrip, self.topBar) and event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 handle = self.windowHandle()
                 if handle is not None:
@@ -473,6 +469,27 @@ class Window(QMainWindow, Ui_MainWindow):
         self._worker.stop()
         self._thread.quit()
         self._thread.wait(3000)
+
+    def _onRpcToggled(self, checked):
+        if hasattr(self, '_rpcManager'):
+            self._rpcManager.setEnabled(self.rpcSwitch.isChecked())
+            self._saveSetting('rpcEnabled', self.rpcSwitch.isChecked())
+
+    def _loadSettings(self):
+        try:
+            with open(appData + '\\settings.json', 'r', encoding='utf-8') as f:
+                return json.loads(f.read())
+        except Exception:
+            return {}
+
+    def _saveSetting(self, key, value):
+        data = self._loadSettings()
+        data[key] = value
+        try:
+            with open(appData + '\\settings.json', 'w', encoding='utf-8') as f:
+                f.write(json.dumps(data))
+        except Exception:
+            pass
 
     def _saveTabs(self):
         data = [self._tabNumber]

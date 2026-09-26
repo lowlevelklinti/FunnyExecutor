@@ -1,8 +1,10 @@
 from PySide6.QtCore import QCoreApplication, QMetaObject, QSize, QByteArray, Qt
 from PySide6.QtGui import QAction, QFont, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMenu, QPushButton, QStackedWidget, QTabBar, QTreeWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMenu, QPushButton, QScrollArea, QStackedWidget, QTabBar, QTreeWidget, QVBoxLayout, QWidget)
+
+from extras import Switch
 
 railBg = "#0f0f0f"
 panelBg = "#131313"
@@ -58,6 +60,8 @@ def navIcon(svg, size=20, dim=textDim, active=textActive):
 
 style = """
 #centralwidget { background-color: #131313; }
+#topBar { background-color: #0f0f0f; border-bottom: 1px solid #1e1e1e; }
+#topTitle { color: #6f6f6f; font-size: 12px; padding-left: 6px; }
 #iconRail { background-color: #0f0f0f; border-right: 1px solid #1e1e1e; }
 #sidebar { background-color: #131313; border-right: 1px solid #1e1e1e; }
 #tabStrip { background-color: #0f0f0f; border-bottom: 1px solid #1e1e1e; }
@@ -65,7 +69,15 @@ style = """
 #editorStack { background-color: #131313; }
 #editorPage, #settingsPage, #mainStack { background-color: #131313; }
 
-#soonLabel { color: #383838; }
+#settingsTitle { color: #e6e6e6; font-size: 22px; font-weight: bold; }
+#settingsSubtitle { color: #8a8a8a; font-size: 12px; }
+#sectionTitle { color: #7a7a7a; font-size: 11px; font-weight: bold; }
+#settingName { color: #e6e6e6; font-size: 13px; }
+#settingDesc { color: #8a8a8a; font-size: 11px; }
+#sep { background-color: #1e1e1e; }
+
+QScrollArea#settingsScroll { background-color: #131313; border: none; }
+QScrollArea#settingsScroll QWidget { background-color: #131313; }
 
 #pathLabel { color: #6f6f6f; font-size: 12px; }
 
@@ -230,6 +242,53 @@ class Ui_MainWindow(object):
         rightLayout.setContentsMargins(0, 0, 0, 0)
         rightLayout.setSpacing(0)
 
+        self.topBar = QFrame(self.rightPanel)
+        self.topBar.setObjectName(u"topBar")
+        self.topBar.setFixedHeight(40)
+        topBarLayout = QHBoxLayout(self.topBar)
+        topBarLayout.setContentsMargins(14, 0, 10, 0)
+        topBarLayout.setSpacing(6)
+        self.topTitle = QLabel("Funny Executor", self.topBar)
+        self.topTitle.setObjectName(u"topTitle")
+        topBarLayout.addWidget(self.topTitle)
+        topBarLayout.addStretch()
+
+        self.yellowBtn = QPushButton(self.topBar)
+        self.yellowBtn.setObjectName(u"yellowBtn")
+        self.yellowBtn.setFixedSize(28, 28)
+        self.yellowBtn.setCheckable(False)
+        self.yellowBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.yellowBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.yellowBtn.setToolTip(u"Minimize")
+        self.yellowBtn.setIcon(navIcon(Icons.minimizeIcon, 16))
+        self.yellowBtn.setIconSize(QSize(16, 16))
+
+        self.greenBtn = QPushButton(self.topBar)
+        self.greenBtn.setObjectName(u"greenBtn")
+        self.greenBtn.setFixedSize(28, 28)
+        self.greenBtn.setCheckable(False)
+        self.greenBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.greenBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.greenBtn.setToolTip(u"Maximize")
+        self.greenBtn.setIcon(navIcon(Icons.resizeIcon, 16))
+        self.greenBtn.setIconSize(QSize(16, 16))
+
+        self.redBtn = QPushButton(self.topBar)
+        self.redBtn.setObjectName(u"redBtn")
+        self.redBtn.setFixedSize(28, 28)
+        self.redBtn.setCheckable(False)
+        self.redBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.redBtn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.redBtn.setToolTip(u"Close")
+        self.redBtn.setIcon(navIcon(Icons.exitIcon, 16))
+        self.redBtn.setIconSize(QSize(16, 16))
+
+        topBarLayout.addWidget(self.yellowBtn)
+        topBarLayout.addWidget(self.greenBtn)
+        topBarLayout.addWidget(self.redBtn)
+
+        rightLayout.addWidget(self.topBar)
+
         self.mainStack = QStackedWidget(self.rightPanel)
         self.mainStack.setObjectName(u"mainStack")
 
@@ -260,40 +319,6 @@ class Ui_MainWindow(object):
         stripLayout.addWidget(self.tabBar)
         stripLayout.addWidget(self.newTabButton)
         stripLayout.addStretch()
-
-        self.yellowBtn = QPushButton(self.tabStrip)
-        self.yellowBtn.setObjectName(u"yellowBtn")
-        self.yellowBtn.setFixedSize(28, 28)
-        self.yellowBtn.setCheckable(False)
-        self.yellowBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.yellowBtn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.yellowBtn.setToolTip(u"Minimize")
-        self.yellowBtn.setIcon(navIcon(Icons.minimizeIcon, 16))
-        self.yellowBtn.setIconSize(QSize(16, 16))
-
-        self.greenBtn = QPushButton(self.tabStrip)
-        self.greenBtn.setObjectName(u"greenBtn")
-        self.greenBtn.setFixedSize(28, 28)
-        self.greenBtn.setCheckable(False)
-        self.greenBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.greenBtn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.greenBtn.setToolTip(u"Maximize")
-        self.greenBtn.setIcon(navIcon(Icons.resizeIcon, 16))
-        self.greenBtn.setIconSize(QSize(16, 16))
-
-        self.redBtn = QPushButton(self.tabStrip)
-        self.redBtn.setObjectName(u"redBtn")
-        self.redBtn.setFixedSize(28, 28)
-        self.redBtn.setCheckable(False)
-        self.redBtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.redBtn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.redBtn.setToolTip(u"Close")
-        self.redBtn.setIcon(navIcon(Icons.exitIcon, 16))
-        self.redBtn.setIconSize(QSize(16, 16))
-
-        stripLayout.addWidget(self.yellowBtn)
-        stripLayout.addWidget(self.greenBtn)
-        stripLayout.addWidget(self.redBtn)
 
         self.breadcrumb = QFrame(self.editorPage)
         self.breadcrumb.setObjectName(u"breadcrumb")
@@ -340,19 +365,71 @@ class Ui_MainWindow(object):
         self.settingsPage.setObjectName(u"settingsPage")
         settingsPageLayout = QVBoxLayout(self.settingsPage)
         settingsPageLayout.setContentsMargins(0, 0, 0, 0)
-        soonFont = QFont()
-        soonFont.setPointSize(34)
-        soonFont.setBold(True)
-        soonFont.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
-        self.soonLabel = QLabel(self.settingsPage)
-        self.soonLabel.setObjectName(u"soonLabel")
-        self.soonLabel.setFont(soonFont)
-        self.soonLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        settingsPageLayout.addWidget(self.soonLabel)
+        settingsPageLayout.setSpacing(0)
 
-        self.rpcCheckBox = QCheckBox("Enable Discord RPC", self.settingsPage)
-        self.rpcCheckBox.setChecked(True)
-        settingsPageLayout.addWidget(self.rpcCheckBox)
+        self.settingsHeader = QWidget(self.settingsPage)
+        self.settingsHeader.setObjectName(u"settingsHeader")
+        headerLayout = QVBoxLayout(self.settingsHeader)
+        headerLayout.setContentsMargins(28, 26, 28, 18)
+        headerLayout.setSpacing(4)
+        self.settingsTitle = QLabel("Settings", self.settingsHeader)
+        self.settingsTitle.setObjectName(u"settingsTitle")
+        self.settingsSubtitle = QLabel("Tweak Funny Executor to your liking", self.settingsHeader)
+        self.settingsSubtitle.setObjectName(u"settingsSubtitle")
+        headerLayout.addWidget(self.settingsTitle)
+        headerLayout.addWidget(self.settingsSubtitle)
+
+        self.settingsScroll = QScrollArea(self.settingsPage)
+        self.settingsScroll.setObjectName(u"settingsScroll")
+        self.settingsScroll.setWidgetResizable(True)
+        self.settingsScroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.settingsContent = QWidget(self.settingsScroll)
+        self.settingsContent.setObjectName(u"settingsContent")
+        contentLayout = QVBoxLayout(self.settingsContent)
+        contentLayout.setContentsMargins(28, 8, 28, 28)
+        contentLayout.setSpacing(6)
+
+        self.integrationsTitle = QLabel("Integrations", self.settingsContent)
+        self.integrationsTitle.setObjectName(u"sectionTitle")
+        contentLayout.addWidget(self.integrationsTitle)
+
+        self.sep1 = QFrame(self.settingsContent)
+        self.sep1.setObjectName(u"sep")
+        self.sep1.setFrameShape(QFrame.Shape.HLine)
+        self.sep1.setFixedHeight(1)
+        contentLayout.addWidget(self.sep1)
+
+        self.rpcRow = QWidget(self.settingsContent)
+        self.rpcRow.setObjectName(u"rpcRow")
+        rpcRowLayout = QHBoxLayout(self.rpcRow)
+        rpcRowLayout.setContentsMargins(0, 10, 0, 10)
+        rpcRowLayout.setSpacing(12)
+
+        self.rpcText = QWidget(self.rpcRow)
+        rpcTextLayout = QVBoxLayout(self.rpcText)
+        rpcTextLayout.setContentsMargins(0, 0, 0, 0)
+        rpcTextLayout.setSpacing(2)
+        self.rpcName = QLabel("Discord Rich Presence", self.rpcText)
+        self.rpcName.setObjectName(u"settingName")
+        self.rpcDesc = QLabel("Show what you're doing on Discord.", self.rpcText)
+        self.rpcDesc.setObjectName(u"settingDesc")
+        rpcTextLayout.addWidget(self.rpcName)
+        rpcTextLayout.addWidget(self.rpcDesc)
+
+        self.rpcSwitch = Switch(self.rpcRow)
+        self.rpcSwitch.setObjectName(u"rpcSwitch")
+        self.rpcSwitch.setChecked(False)
+        rpcRowLayout.addWidget(self.rpcText, 1)
+        rpcRowLayout.addWidget(self.rpcSwitch, 0, Qt.AlignmentFlag.AlignRight)
+
+        contentLayout.addWidget(self.rpcRow)
+        contentLayout.addSpacing(8)
+
+        contentLayout.addStretch(1)
+
+        self.settingsScroll.setWidget(self.settingsContent)
+        settingsPageLayout.addWidget(self.settingsHeader)
+        settingsPageLayout.addWidget(self.settingsScroll, 1)
 
         self.mainStack.addWidget(self.editorPage)
         self.mainStack.addWidget(self.settingsPage)
@@ -398,4 +475,3 @@ class Ui_MainWindow(object):
         self.searchEdit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"Search", None))
         self.pathLabel.setText(QCoreApplication.translate("MainWindow", u"Funny Executor", None))
         self.statusLabel.setText(QCoreApplication.translate("MainWindow", u"\u2b24", None))
-        self.soonLabel.setText(QCoreApplication.translate("MainWindow", u"SOON!", None))
