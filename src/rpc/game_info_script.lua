@@ -1,6 +1,3 @@
--- Game Info Script - sends game info to Python bridge
--- Execute after injection. Runs in background, sends PlaceId/name/creator every 5s.
-
 local MarketplaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
 
@@ -73,7 +70,6 @@ local function sendGameInfo(force)
     lastSendTime = now
 end
 
--- Spawn background loop so executor stays free for other scripts
 task.spawn(function()
     sendGameInfo(true)
     while true do
