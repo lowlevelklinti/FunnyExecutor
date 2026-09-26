@@ -12,9 +12,24 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QSizeGrip,
 from extras import CodeEditor, MessageBox
 
 import FAPI
+from rpc.rpc_manager import RpcManager
 
 navDim = "#8a8a8a"
 navActive = "#e6e6e6"
+
+CLIENT_ID = "1553410003417960469"
+
+from pypresence import Presence
+
+rpc = Presence(CLIENT_ID)
+rpc.connect()
+
+rpc.update(
+    state="In Funny Executor",
+    details="Idling",
+    large_image="logo",
+    large_text="Funny Executor",
+)
 
 class RobloxWorker(QObject):
     statusChanged = Signal(str)
@@ -242,6 +257,14 @@ class Window(QMainWindow, Ui_MainWindow):
 
         self._thread.start()
 
+        # RPC: connect to worker so game info script runs through the injected executor
+        self._rpcManager = RpcManager(rpc, poll_interval=5.0)
+        self._rpcManager.setExecutor(self._worker)
+        self._rpcManager.start()
+
+        # RPC toggle in settings
+        self.rpcCheckBox.toggled.connect(self._rpcManager.setEnabled)
+
         self._autosaveTimer = QTimer(self)
         self._autosaveTimer.timeout.connect(self._saveTabs)
         self._autosaveTimer.start(10000)
@@ -445,6 +468,8 @@ class Window(QMainWindow, Ui_MainWindow):
             self.tabBar.setCurrentIndex(newIndex)
 
     def _shutdownWorker(self):
+        if hasattr(self, '_rpcManager'):
+            self._rpcManager.stop()
         self._worker.stop()
         self._thread.quit()
         self._thread.wait(3000)

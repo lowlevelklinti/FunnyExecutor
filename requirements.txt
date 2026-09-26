@@ -7,3 +7,4 @@ psutil
 PySide6
 zstandard
 websocket-client
+pypresence

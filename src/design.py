@@ -1,7 +1,7 @@
 from PySide6.QtCore import QCoreApplication, QMetaObject, QSize, QByteArray, Qt
 from PySide6.QtGui import QAction, QFont, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QMenu, QPushButton, QStackedWidget, QTabBar, QTreeWidget, QVBoxLayout, QWidget)
 
 railBg = "#0f0f0f"
@@ -349,6 +349,10 @@ class Ui_MainWindow(object):
         self.soonLabel.setFont(soonFont)
         self.soonLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         settingsPageLayout.addWidget(self.soonLabel)
+
+        self.rpcCheckBox = QCheckBox("Enable Discord RPC", self.settingsPage)
+        self.rpcCheckBox.setChecked(True)
+        settingsPageLayout.addWidget(self.rpcCheckBox)
 
         self.mainStack.addWidget(self.editorPage)
         self.mainStack.addWidget(self.settingsPage)
