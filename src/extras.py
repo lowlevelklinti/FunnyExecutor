@@ -1,554 +1,374 @@
-import re
+import json
 import time
 import threading
-import requests
-from pathlib import Path
 
-from PySide6.QtCore import QRegularExpression, QRect, QSize, Qt, QTimer, Property, QPropertyAnimation, QEasingCurve, Signal
-from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QPainter
-from PySide6.QtWidgets import QPlainTextEdit, QMessageBox, QWidget
+from PySide6.QtCore import Qt, Property, QPropertyAnimation, QEasingCurve, Signal
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QMessageBox, QWidget
 
-boldFont = 700
+try:
+    from qtmonaco import Monaco
+    import qtmonaco.monaco as _monaco_module
+except Exception as e:
+    raise ImportError(
+        'FunnyExecutor needs qtmonaco and the Qt WebEngine bindings.\n'
+        'Install them with:  pip install "qtmonaco[all,pyside6]"'
+    ) from e
 
-_luauRules = None
 
-class LuauHighlighter(QSyntaxHighlighter):
-    # debugger
-    _reBlockComment = re.compile(r"--\[\[.*?\]\]", re.DOTALL)
-    _reLineComment = re.compile(r"--[^\n]*")
-    _reDstring = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')
-    _reSstring = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'")
+_monaco_module.get_pylsp_host = lambda: ""
 
-    _reLocalFunc = re.compile(r"\blocal\s+function\s+([A-Za-z_]\w*)")
-    _reLocalVars = re.compile(r"\blocal\s+(?!function\b)((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)")
-    _reFuncParams = re.compile(r"\bfunction\b[^()]*\(([^)]*)\)")
-    _reForIn = re.compile(r"\bfor\s+((?:[A-Za-z_]\w*\s*,\s*)*[A-Za-z_]\w*)\s+in\b")
-    _reForNum = re.compile(r"\bfor\s+([A-Za-z_]\w*)\s*=")
-    _reAssignTarget = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
-    _reIdentifier = re.compile(r"\b[A-Za-z_]\w*\b")
-    _reTableKey = re.compile(r"\b([A-Za-z_]\w*)\s*=(?!=)")
-    _reFuncCall = re.compile(r"\b([A-Za-z_]\w*)\s*(?=[\({\"'])")
-    _reGlobalFunc = re.compile(r"(?<!\blocal\s)(?<!\blocal\s{2})(?<!\blocal\s{3})\bfunction\s+([A-Za-z_]\w*)")
 
-    def __init__(self, document):
-        super().__init__(document)
+defaultScript = 'print("Hello, World!")'
 
-        global _luauRules
+luauKeywords = [
+    "and", "break", "continue", "do", "else", "elseif", "end", "export",
+    "false", "for", "function", "if", "in", "local", "nil", "not", "or",
+    "repeat", "return", "then", "true", "type", "typeof", "until", "while",
+]
 
-        self.progressiveLimit = None
-        self._lastRevision = None
-        self.undefinedRanges = []
-        self.unusedRanges = []
+robloxGlobals = [
+    "game", "workspace", "script", "plugin", "Instance", "Enum", "Vector2",
+    "Vector3", "CFrame", "UDim", "UDim2", "Color3", "BrickColor", "Ray",
+    "Rect", "Region3", "Region3int16", "NumberSequence",
+    "NumberSequenceKeypoint", "NumberRange", "ColorSequence",
+    "ColorSequenceKeypoint", "PhysicalProperties", "TweenInfo", "DateTime",
+    "Random", "Vector3int16", "Font", "Axes", "Faces", "print", "warn",
+    "error", "math", "string", "table", "os", "coroutine", "task", "debug",
+    "utf8", "bit32", "buffer", "tonumber", "tostring",
+    "pcall", "xpcall", "select", "assert", "require", "pairs", "ipairs",
+    "next", "unpack", "rawget", "rawset", "rawequal", "rawlen",
+    "setmetatable", "getmetatable", "collectgarbage", "tick", "wait",
+    "spawn", "delay", "elapsedTime", "_G", "shared", "self",
+]
 
-        if _luauRules is not None:
-            self.rules = _luauRules['rules']
-            self.commentFormat = _luauRules['commentFormat']
-            self.blockCommentStart = _luauRules['blockCommentStart']
-            self.blockCommentEnd = _luauRules['blockCommentEnd']
-            self._knownBuiltins = _luauRules['knownBuiltins']
-            return
+uncApi = {
+    "getgenv": ("()", "Returns the global environment shared by every script."),
+    "getrenv": ("()", "Returns the Roblox (sanitised) global environment."),
+    "getreg": ("()", "Returns the Lua registry table."),
+    "getgc": ("(includeTables)", "Returns a list of all garbage-collected values."),
+    "filtergc": ("(type, options)", "Returns gc values filtered by type or a predicate."),
+    "getsenv": ("(script)", "Returns the environment of the given script."),
+    "getinstances": ("()", "Returns every Instance currently in the game."),
+    "getnilinstances": ("()", "Returns instances parented to nil."),
+    "getloadedmodules": ("()", "Returns all loaded ModuleScripts."),
+    "getscripts": ("()", "Returns every script object in the game."),
+    "getscriptbytecode": ("(script)", "Returns the compiled bytecode of a script."),
+    "getscripthash": ("(script)", "Returns the hash of a script's bytecode."),
+    "getupvalue": ("(func, index)", "Returns the value of an upvalue."),
+    "getupvalues": ("(func)", "Returns a list of the function's upvalues."),
+    "setupvalue": ("(func, index, value)", "Sets the value of an upvalue."),
+    "getconstant": ("(func, index)", "Returns a constant from a function."),
+    "getconstants": ("(func)", "Returns all constants of a function."),
+    "setconstant": ("(func, index, value)", "Overwrites a constant in a function."),
+    "getproto": ("(func, index)", "Returns a nested prototype of a function."),
+    "getprotos": ("(func)", "Returns all nested prototypes of a function."),
+    "getstack": ("(level)", "Returns the stack of a running thread."),
+    "setstack": ("(level, index, value)", "Overwrites a value on the stack."),
+    "isreadonly": ("(table)", "Returns true when the table is read-only."),
+    "islclosure": ("(func)", "Returns true for Lua closures."),
+    "iscclosure": ("(func)", "Returns true for C closures."),
+    "newcclosure": ("(func)", "Wraps a Lua function so it reports as a C closure."),
+    "loadstring": ("(code)", "Compiles a string and returns a function."),
+    "gethui": ("()", "Returns a hidden UI container that is not replicated."),
+    "identifyexecutor": ("()", "Returns the executor name and version."),
+    "getexecutorname": ("()", "Returns the name of the current executor."),
+    "getexecutorversion": ("()", "Returns the version of the current executor."),
+    "setfpscap": ("(fps)", "Raises or removes the frame rate cap."),
+    "getfpscap": ("()", "Returns the current frame rate cap."),
+    "base64encode": ("(data)", "Encodes a string to base64."),
+    "base64decode": ("(data)", "Decodes a base64 string."),
+    "crypt": ("(data, key)", "Encrypts or decrypts data with a key."),
+    "hash": ("(data)", "Hashes a string."),
+    "lz4compress": ("(data)", "Compresses data with LZ4."),
+    "lz4decompress": ("(data)", "Decompresses LZ4 data."),
+    "dumpstring": ("(func)", "Dumps a string from a function's constants."),
+    "decompile": ("(script)", "Attempts to decompile a script back to source."),
+    "saveinstance": ("(options)", "Saves the current game to disk."),
+    "savegame": ("()", "Saves the current place."),
+    "writefile": ("(path, data)", "Writes data to a file in the workspace folder."),
+    "appendfile": ("(path, data)", "Appends data to a file."),
+    "readfile": ("(path)", "Reads a file and returns its contents."),
+    "isfile": ("(path)", "Returns true when the path is a file."),
+    "isfolder": ("(path)", "Returns true when the path is a folder."),
+    "delfile": ("(path)", "Deletes a file."),
+    "delfolder": ("(path)", "Deletes a folder."),
+    "makefolder": ("(path)", "Creates a folder."),
+    "listfiles": ("(path)", "Lists the contents of a folder."),
+    "loadfile": ("(path)", "Loads a file from disk and returns a function."),
+    "setclipboard": ("(text)", "Copies text to the system clipboard."),
+    "getclipboard": ("()", "Returns the current clipboard contents."),
+    "messagebox": ("(text, caption, type)", "Shows a native message box."),
+    "request": ("(options)", "Performs an HTTP request. Returns StatusCode, Body, Headers."),
+    "http_request": ("(options)", "Alias of request()."),
+    "queue_on_teleport": ("(code)", "Queues code to run after a teleport."),
+    "getnamecallmethod": ("()", "Returns the method name of the current namecall."),
+    "setnamecallmethod": ("(name)", "Spoofs the namecall method name."),
+    "getrawmetatable": ("(object)", "Returns the real metatable of an object."),
+    "setrawmetatable": ("(object, metatable)", "Sets the real metatable of an object."),
+    "getcustomasset": ("(path)", "Returns a content string usable by ImageLabel and Sound."),
+    "mouse1click": ("()", "Clicks the left mouse button."),
+    "mouse2click": ("()", "Clicks the right mouse button."),
+    "mouse1press": ("()", "Presses the left mouse button."),
+    "mouse1release": ("()", "Releases the left mouse button."),
+    "mouse2press": ("()", "Presses the right mouse button."),
+    "mouse2release": ("()", "Releases the right mouse button."),
+    "mousemoveabs": ("(x, y)", "Moves the cursor to absolute screen coordinates."),
+    "mousemoverel": ("(x, y)", "Moves the cursor relative to its position."),
+    "getmousepos": ("()", "Returns the cursor position."),
+    "keyclick": ("(key)", "Presses and releases a key."),
+    "keypress": ("(key)", "Presses a key."),
+    "keyrelease": ("(key)", "Releases a key."),
+    "isrbxactive": ("()", "Returns true when the Roblox window is focused."),
+    "iswindowactive": ("()", "Returns true when the Roblox window is focused."),
+    "Drawing": ("()", "Creates a new Drawing object."),
+    "WebSocket": ("(url)", "Opens a websocket connection."),
+    "firesignal": ("(signal, args)", "Fires a RobloxScriptSignal."),
+    "getconnections": ("(signal)", "Returns the connections of a signal."),
+    "fireproximityprompt": ("(prompt)", "Triggers a ProximityPrompt."),
+    "openfiledialog": ("(options)", "Opens a native file picker dialog."),
+    "savefiledialog": ("(options)", "Opens a native save dialog."),
+    "getrenderproperty": ("(instance, property)", "Reads a render property."),
+    "setrenderproperty": ("(instance, property, value)", "Writes a render property."),
+}
 
-        self.rules = []
+def buildSnippet(name, params):
+    inner = params.strip()[1:-1].strip() if params.startswith("(") else ""
+    if not inner:
+        return name + "()"
+    parts = [p.strip() for p in inner.split(",") if p.strip()]
+    args = ", ".join("${%d:%s}" % (i + 1, p) for i, p in enumerate(parts))
+    return "%s(%s)" % (name, args)
 
-        # keywords
-        keywordFormat = QTextCharFormat()
-        keywordFormat.setForeground(QColor("#8e9ae6"))
-        keywordFormat.setFontWeight(boldFont)
-        self.keywords = [
-            "and", "break", "do", "else", "elseif", "end",
-            "for", "function", "if", "in", "local", "nil", "not",
-            "or", "repeat", "return", "then", "until", "while",
-            "continue", "export", "const"
-        ]
-        for word in self.keywords:
-            pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, keywordFormat))
+def comp():
+    items = []
+    for word in luauKeywords:
+        items.append({"label": word, "kind": "Keyword", "detail": "keyword"})
+    for word in robloxGlobals:
+        items.append({"label": word, "kind": "Variable", "detail": "Roblox global"})
+    for name, (params, doc) in sorted(uncApi.items()):
+        items.append({
+            "label": name,
+            "kind": "Function",
+            "detail": name + params,
+            "doc": doc,
+            "insert": buildSnippet(name, params),
+            "snippet": True,
+        })
 
-        # booleans
-        boolFormat = QTextCharFormat()
-        boolFormat.setForeground(QColor("#d6cc61"))
-        boolFormat.setFontWeight(boldFont)
-        self.booleans = ['true', 'false']
-        for word in self.booleans:
-            pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, boolFormat))
-
-        # globals
-        globalsFormat = QTextCharFormat()
-        globalsFormat.setForeground(QColor("#d6cc61"))
-        self.globalsKeywords = [
-            "print", 'math', 'string', 'table',
-            'type', 'tonumber', 'tostring', 'error', 'pcall',
-            '_G', 'shared', 'game', 'workspace', 'warn', 'pairs', 'ipairs', 'next',
-            'select', 'assert', 'require',
-            'Instance', 'Enum', 'Vector2', 'Vector3', 'CFrame', 'UDim', 'UDim2',
-            'Color3', 'BrickColor', 'Ray', 'Rect', 'Region3', 'Region3int16',
-            'NumberSequence', 'NumberSequenceKeypoint', 'NumberRange',
-            'ColorSequence', 'ColorSequenceKeypoint', 'PhysicalProperties',
-            'TweenInfo', 'DateTime', 'Random', 'Vector3int16', 'Font',
-            'task', 'coroutine', 'os', 'debug', 'utf8', 'bit32', 'buffer',
-            'tick', 'wait', 'spawn', 'delay', 'elapsedTime',
-            'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal', 'rawlen',
-            'unpack', 'xpcall', 'collectgarbage', 'self',
-        ]
-        for word in self.globalsKeywords:
-            pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, globalsFormat))
-
-        # unc
-        uncFormat = QTextCharFormat()
-        uncFormat.setForeground(QColor("#8e9ae6"))
-        self.uncKeywords = [
-            'getgenv', 'base64encode', 'base64decode', 'crypt',
-            'lz4compress', 'lz4decompress', 'loadstring', 'writefile',
-            'appendfile', 'readfile', 'isfile', 'isfolder',
-            'delfile', 'delfolder', 'makefolder', 'listfiles',
-            'setclipboard', 'getclipboard', 'messagebox', 'identifyexecutor',
-            'loadfile', 'setfpscap', 'getfpscap', 'getexecutorname',
-            'getexecutorversion', 'islclosure',
-            'iscclosure', 'newcclosure', 'gethui', 'getnilinstances', 'getloadedmodules',
-            'getscripts', 'isreadonly', 'queue_on_teleport',
-            'getnamecallmethod', 'http_request', 'crypt', 'hash',
-            'messagebox', 'mouse1click', 'mouse2click', 'mouse1press',
-            'mouse1release', 'mouse2press', 'mouse2release', 'movemouse',
-            'mousemoveabs', 'mouserel', 'mousemoverel', 'getmousepos',
-            'getmouselocation', 'keyclick', 'keypress', 'keyrelease',
-            'iswindowactive', 'isrbxactive', 'getscriptbytecode', 'dumpstring',
-            'getscripthash', 'Drawing', 'WebSocket', 'websocket', 'decompile',
-            'saveinstance', 'savegame', 'isrenderavailable', 'getrenderproperty',
-            'setrenderproperty', 'request', 'syn', 'http',
-            'Signal', 'openfiledialog', 'savefiledialog', 'openfolderdialog',
-            'openfilesdialog', 'getinstances', 'getcustomasset',
-            'getrenv', 'getreg', 'getgc', 'filtergc', 'getsenv',
-            'getconstant', 'getconstants', 'getupvalue', 'getupvalues',
-            'setupvalue', 'setconstant', 'getproto', 'getprotos',
-            'getstack', 'setstack'
-        ]
-        for word in self.uncKeywords:
-            pattern = QRegularExpression(f"\\b{word}\\b")
-            self.rules.append((pattern, uncFormat))
-
-        # numbers
-        numberFormat = QTextCharFormat()
-        numberFormat.setForeground(QColor("#d6cc61"))
-        self.rules.append((QRegularExpression(r"\b\d+(\.\d+)?\b"), numberFormat))
-
-        # member
-        memberFormat = QTextCharFormat()
-        memberFormat.setForeground(QColor("#7b99ec"))
-
-        memberPattern = QRegularExpression(r"(?<=\.)[a-zA-Z_][a-zA-Z0-9_]*\b")
-        self.rules.append((memberPattern, memberFormat))
-
-        # functions
-        functionFormat = QTextCharFormat()
-        functionFormat.setForeground(QColor("#7b99ec"))
-
-        # func calls
-        pat = '|'.join(self.uncKeywords + self.globalsKeywords)
-        callPattern = QRegularExpression(r"\b(?!(?:"+pat+r")\b)[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()")
-        self.rules.append((callPattern, functionFormat))
-
-        # func defs
-        defPattern = QRegularExpression(r"\bfunction\s+\K[a-zA-Z_][a-zA-Z0-9_]*\b")
-        self.rules.append((defPattern, functionFormat))
-
-        # strings
-        stringFormat = QTextCharFormat()
-        stringFormat.setForeground(QColor("#abd4b4"))
-        self.rules.append((QRegularExpression('"[^"\\\\]*(\\\\.[^"\\\\]*)*"'), stringFormat))
-        self.rules.append((QRegularExpression("'[^'\\\\]*(\\\\.[^'\\\\]*)*'"), stringFormat))
-
-        # comment
-        self.commentFormat = QTextCharFormat()
-        self.commentFormat.setForeground(QColor("#646464"))
-        self.commentFormat.setFontItalic(True)
-        self.rules.append((QRegularExpression("--[^\n]*"), self.commentFormat))
-
-        self.blockCommentStart = QRegularExpression(r"--\[\[")
-        self.blockCommentEnd = QRegularExpression(r"\]\]")
-
-        self.undefinedFormat = QTextCharFormat()
-        self.undefinedFormat.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-        self.undefinedFormat.setUnderlineColor(QColor("#ff5561"))
-
-        self._knownBuiltins = set(self.keywords) | set(self.booleans) | \
-            set(self.globalsKeywords) | set(self.uncKeywords)
-
-        _luauRules = {
-            'rules': self.rules,
-            'commentFormat': self.commentFormat,
-            'blockCommentStart': self.blockCommentStart,
-            'blockCommentEnd': self.blockCommentEnd,
-            'knownBuiltins': self._knownBuiltins,
+    hover = {}
+    signatures = {}
+    for word in robloxGlobals:
+        hover[word] = {"sig": word, "doc": "Roblox global"}
+    for name, (params, doc) in uncApi.items():
+        hover[name] = {"sig": name + params, "doc": doc}
+        inner = params.strip()[1:-1].strip()
+        signatures[name] = {
+            "label": name + params,
+            "doc": doc,
+            "params": [p.strip() for p in inner.split(",") if p.strip()],
         }
+    return {"items": items, "hover": hover, "signatures": signatures}
 
-    def _findTableKeyPositions(self, text):
-        keyPositions = set()
-        braceDepth = 0
-        braceStarts = []
-        for i, ch in enumerate(text):
-            if ch == '{':
-                braceDepth += 1
-                braceStarts.append(i)
-            elif ch == '}':
-                if braceDepth > 0:
-                    braceDepth -= 1
-                    braceStarts.pop()
+def _monacoSetupScript():
+    data = json.dumps(comp())
+    return """
+(function () {
+    var qt = window.qtmonaco;
+    if (!qt || !qt.monaco) { return 'no-monaco'; }
+    var monaco = qt.monaco;
+    var ed = qt.editor;
+    var DATA = %(data)s;
 
-        braceRanges = []
-        stack = []
-        for i, ch in enumerate(text):
-            if ch == '{':
-                stack.append(i)
-            elif ch == '}' and stack:
-                start = stack.pop()
-                braceRanges.append((start, i))
+    document.body.style.background = '#131313';
 
-        reTkey = re.compile(r'\b([A-Za-z_]\w*)\s*=(?!=)')
-        for bstart, bend in braceRanges:
-            region = text[bstart:bend + 1]
-            for m in reTkey.finditer(region):
-                absStart = bstart + m.start(1)
-                absEnd = bstart + m.end(1)
-                keyPositions.add((absStart, absEnd))
+    monaco.editor.defineTheme('funny-dark', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+            { token: '', foreground: 'd0d0d0' },
+            { token: 'keyword', foreground: '8e9ae6', fontStyle: 'bold' },
+            { token: 'keyword.control', foreground: '8e9ae6', fontStyle: 'bold' },
+            { token: 'support.function', foreground: 'd6cc61' },
+            { token: 'identifier', foreground: 'd0d0d0' },
+            { token: 'number', foreground: 'd6cc61' },
+            { token: 'number.hex', foreground: 'd6cc61' },
+            { token: 'number.float', foreground: 'd6cc61' },
+            { token: 'string', foreground: 'abd4b4' },
+            { token: 'string.escape', foreground: 'd6cc61' },
+            { token: 'string.invalid', foreground: 'ff5561' },
+            { token: 'comment', foreground: '646464', fontStyle: 'italic' },
+            { token: 'operator', foreground: '8a8a8a' },
+            { token: 'delimiter', foreground: '8a8a8a' }
+        ],
+        colors: {
+            'editor.background': '#131313',
+            'editor.foreground': '#d0d0d0',
+            'editorGutter.background': '#131313',
+            'editorLineNumber.foreground': '#4a4a4a',
+            'editorLineNumber.activeForeground': '#9a9a9a',
+            'editor.lineHighlightBackground': '#171717',
+            'editor.lineHighlightBorder': '#00000000',
+            'editor.selectionBackground': '#264f78',
+            'editor.inactiveSelectionBackground': '#1f3b57',
+            'editorCursor.foreground': '#e6e6e6',
+            'editorIndentGuide.background': '#1e1e1e',
+            'editorIndentGuide.activeBackground': '#2a2a2a',
+            'editorWidget.background': '#1b1b1b',
+            'editorWidget.border': '#2a2a2a',
+            'editorSuggestWidget.background': '#1b1b1b',
+            'editorSuggestWidget.border': '#2a2a2a',
+            'editorSuggestWidget.selectedBackground': '#2a2a2a',
+            'editorHoverWidget.background': '#1b1b1b',
+            'editorHoverWidget.border': '#2a2a2a',
+            'editorOverviewRuler.border': '#00000000',
+            'scrollbarSlider.background': '#2a2a2a99',
+            'scrollbarSlider.hoverBackground': '#3a3a3acc',
+            'scrollbarSlider.activeBackground': '#3a3a3a'
+        }
+    });
+    monaco.editor.setTheme('funny-dark');
 
-        return keyPositions
+    var KIND = monaco.languages.CompletionItemKind;
+    var SNIPPET = monaco.languages.CompletionItemInsertTextRule;
 
-    def analyze(self):
-        doc = self.document()
-        if self._lastRevision == doc.revision():
-            return
-        self._lastRevision = doc.revision()
-        self.analyzeText(doc.toPlainText())
+    monaco.languages.registerCompletionItemProvider('lua', {
+        triggerCharacters: ['.', ':'],
+        provideCompletionItems: function (model, position) {
+            var word = model.getWordUntilPosition(position);
+            var range = {
+                startLineNumber: position.lineNumber,
+                endLineNumber: position.lineNumber,
+                startColumn: word.startColumn,
+                endColumn: word.endColumn
+            };
+            var suggestions = DATA.items.map(function (it) {
+                var item = {
+                    label: it.label,
+                    kind: KIND[it.kind] || KIND.Text,
+                    detail: it.detail,
+                    insertText: it.insert || it.label,
+                    range: range
+                };
+                if (it.doc) { item.documentation = { value: it.doc }; }
+                if (it.snippet) { item.insertTextRules = SNIPPET.InsertAsSnippet; }
+                return item;
+            });
+            return { suggestions: suggestions };
+        }
+    });
 
-    def analyzeText(self, text):
-        stripped = list(text)
-        for rx in (self._reBlockComment, self._reLineComment, self._reDstring, self._reSstring):
-            for m in rx.finditer(text):
-                for i in range(m.start(), m.end()):
-                    if stripped[i] != '\n':
-                        stripped[i] = ' '
-        strippedText = ''.join(stripped)
+    monaco.languages.registerHoverProvider('lua', {
+        provideHover: function (model, position) {
+            var word = model.getWordAtPosition(position);
+            if (!word) { return null; }
+            var info = DATA.hover[word.word];
+            if (!info) { return null; }
+            return {
+                contents: [
+                    { value: '```lua\\n' + info.sig + '\\n```' },
+                    { value: info.doc }
+                ]
+            };
+        }
+    });
 
-        tableKeyPositions = self._findTableKeyPositions(strippedText)
+    monaco.languages.registerSignatureHelpProvider('lua', {
+        signatureHelpTriggerCharacters: ['(', ','],
+        signatureHelpRetriggerCharacters: [','],
+        provideSignatureHelp: function (model, position) {
+            var line = model.getValueInRange({
+                startLineNumber: position.lineNumber, startColumn: 1,
+                endLineNumber: position.lineNumber, endColumn: position.column
+            });
+            var match = line.match(/([A-Za-z_][\\w.:]*)\\s*\\(([^()]*)$/);
+            if (!match) { return null; }
+            var name = match[1].split('.').pop().split(':').pop();
+            var sig = DATA.signatures[name];
+            if (!sig) { return null; }
+            var active = match[2].split(',').length - 1;
+            return {
+                value: {
+                    signatures: [{
+                        label: sig.label,
+                        documentation: { value: sig.doc },
+                        parameters: sig.params.map(function (p) { return { label: p }; })
+                    }],
+                    activeSignature: 0,
+                    activeParameter: Math.min(active, Math.max(sig.params.length - 1, 0))
+                },
+                dispose: function () {}
+            };
+        }
+    });
 
-        funcCallPositions = set()
-        for m in self._reFuncCall.finditer(strippedText):
-            funcCallPositions.add((m.start(1), m.end(1)))
+    if (ed) {
+        ed.updateOptions({
+            fontFamily: 'Consolas',
+            fontSize: 14,
+            fontLigatures: false,
+            minimap: { enabled: false },
+            scrollBeyondLastLine: false,
+            renderLineHighlight: 'line',
+            tabSize: 4,
+            insertSpaces: true,
+            automaticLayout: true,
+            padding: { top: 6, bottom: 6 },
+            scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+            smoothScrolling: true,
+            cursorBlinking: 'smooth',
+            quickSuggestions: true,
+            suggestOnTriggerCharacters: true,
+            wordBasedSuggestions: 'currentDocument'
+        });
+    }
+    return 'ok';
+})()
+""" % {"data": data}
 
-        declared = set()
-        declaredPositions = {}
-
-        def addNames(groupText, baseOffset):
-            offset = 0
-            for name in groupText.split(','):
-                rawName = name
-                name = name.strip()
-                if name and name != '...' and re.match(r'^[A-Za-z_]\w*$', name):
-                    declared.add(name)
-                    namePos = groupText.find(name, offset)
-                    if namePos >= 0:
-                        absPos = baseOffset + namePos
-                        if name not in declaredPositions:
-                            declaredPositions[name] = []
-                        declaredPositions[name].append(absPos)
-                offset += len(rawName) + 1  # +1 for comma
-
-        for m in self._reLocalFunc.finditer(strippedText):
-            name = m.group(1)
-            declared.add(name)
-            if name not in declaredPositions:
-                declaredPositions[name] = []
-            declaredPositions[name].append(m.start(1))
-
-        for m in self._reLocalVars.finditer(strippedText):
-            addNames(m.group(1), m.start(1))
-
-        for m in self._reFuncParams.finditer(strippedText):
-            addNames(m.group(1), m.start(1))
-
-        for m in self._reForIn.finditer(strippedText):
-            addNames(m.group(1), m.start(1))
-
-        for m in self._reForNum.finditer(strippedText):
-            name = m.group(1)
-            declared.add(name)
-            if name not in declaredPositions:
-                declaredPositions[name] = []
-            declaredPositions[name].append(m.start(1))
-
-        for m in self._reAssignTarget.finditer(strippedText):
-            declared.add(m.group(1))
-
-        for m in self._reGlobalFunc.finditer(strippedText):
-            declared.add(m.group(1))
-
-        known = self._knownBuiltins | declared
-
-        undefinedRanges = []
-        usedNames = set()
-
-        for m in self._reIdentifier.finditer(strippedText):
-            name = m.group()
-            start = m.start()
-            end = m.end()
-
-            prevChar = strippedText[start - 1] if start > 0 else ''
-            if prevChar in ('.', ':'):
-                continue
-
-            if (start, end) in tableKeyPositions:
-                continue
-
-            if name in known:
-                if name in declaredPositions:
-                    if start not in declaredPositions[name]:
-                        usedNames.add(name)
-                continue
-
-            if (start, end) in funcCallPositions:
-                continue
-
-            undefinedRanges.append((start, len(name)))
-
-        self.undefinedRanges = undefinedRanges
-
-        unusedRanges = []
-        for name, positions in declaredPositions.items():
-            if name in usedNames:
-                continue
-            if name.startswith('_'):
-                continue
-            if name in self._knownBuiltins:
-                continue
-            for pos in positions:
-                unusedRanges.append((pos, len(name)))
-
-        self.unusedRanges = unusedRanges
-
-    def highlightBlock(self, text):
-        limit = self.progressiveLimit
-        if limit is not None:
-            if limit == 0:
-                return
-            if self.currentBlock().blockNumber() >= limit:
-                return
-
-        for pattern, fmt in self.rules:
-            matchIterator = pattern.globalMatch(text)
-            while matchIterator.hasNext():
-                match = matchIterator.next()
-                self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
-
-        # block comments
-        self.setCurrentBlockState(0)
-
-        if self.previousBlockState() != 1:
-            match = self.blockCommentStart.match(text)
-            startIndex = match.capturedStart() if match.hasMatch() else -1
-        else:
-            startIndex = 0
-
-        while startIndex >= 0:
-            endMatch = self.blockCommentEnd.match(text, startIndex)
-            if endMatch.hasMatch():
-                endIndex = endMatch.capturedStart()
-                commentLength = endIndex - startIndex + endMatch.capturedLength()
-                self.setFormat(startIndex, commentLength, self.commentFormat)
-                nextMatch = self.blockCommentStart.match(text, startIndex + commentLength)
-                startIndex = nextMatch.capturedStart() if nextMatch.hasMatch() else -1
-            else:
-                self.setCurrentBlockState(1)
-                commentLength = len(text) - startIndex
-                self.setFormat(startIndex, commentLength, self.commentFormat)
-                break
-
-        blockStart = self.currentBlock().position()
-        blockEnd = blockStart + len(text)
-
-        for start, length in self.undefinedRanges:
-            if start >= blockEnd or start + length <= blockStart:
-                continue
-            relStart = max(start, blockStart) - blockStart
-            relEnd = min(start + length, blockEnd) - blockStart
-            if relEnd > relStart:
-                fmt = self.format(relStart)
-                fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                fmt.setUnderlineColor(QColor("#ff5561"))
-                self.setFormat(relStart, relEnd - relStart, fmt)
-
-        for start, length in self.unusedRanges:
-            if start >= blockEnd or start + length <= blockStart:
-                continue
-            relStart = max(start, blockStart) - blockStart
-            relEnd = min(start + length, blockEnd) - blockStart
-            if relEnd > relStart:
-                fmt = self.format(relStart)
-                fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
-                fmt.setUnderlineColor(QColor("#d6cc61"))
-                self.setFormat(relStart, relEnd - relStart, fmt)
-
-class LineNumberArea(QWidget):
-    def __init__(self, editor):
-        super().__init__(editor)
-        self.editor = editor
-
-    def sizeHint(self):
-        return QSize(self.editor.lineNumberAreaWidth(), 0)
-
-    def paintEvent(self, event):
-        self.editor.lineNumberAreaPaintEvent(event)
-
-class CodeEditor(QPlainTextEdit):
-    syncBlockLimit = 200
-    syncCharLimit = 10000
-    progressiveChunk = 40
+class CodeEditor(Monaco):
 
     def __init__(self, content=None):
         super().__init__()
-
         self.setObjectName(u"codeEditor")
-        self.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.setStyleSheet("QPlainTextEdit{background-color:#131313;color:#d0d0d0;border:none;padding:6px 6px 6px 4px;selection-background-color:#264f78;}")
+        self._ready = False
+        self.initialized.connect(self._onInitialized)
 
-        font1 = QFont()
-        font1.setFamilies([u"Consolas"])
-        font1.setPointSize(11)
-        self.setFont(font1)
+        self.page().setBackgroundColor(QColor("#131313"))
+        self.setStyleSheet("QWebEngineView { background-color: #131313; }")
 
-        self.lineNumberArea = LineNumberArea(self)
-        self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
-        self.updateRequest.connect(self.updateLineNumberArea)
-        self.updateLineNumberAreaWidth()
+        self.set_minimap_enabled(False)
+        self.set_scroll_beyond_last_line_enabled(False)
+        self.set_language("lua")
+        self.set_theme("vs-dark")
+        self.set_text(defaultScript if content is None else content)
 
-        self.highlighter = None
-        self._rehighlighting = False
-        self._progressiveBlock = 0
-
-        self._highlightTimer = QTimer(self)
-        self._highlightTimer.setSingleShot(True)
-        self._highlightTimer.setInterval(200)
-        self._highlightTimer.timeout.connect(self._runHighlight)
-
-        self._progressiveTimer = QTimer(self)
-        self._progressiveTimer.setInterval(0)
-        self._progressiveTimer.timeout.connect(self._progressiveStep)
-
-        if content is None:
-            content = 'print("Hello, World!")'
-        self.setPlainText(content)
-
-        self.document().contentsChanged.connect(self._onContentsChanged)
-
-    def _isLarge(self):
-        doc = self.document()
-        return doc.blockCount() > self.syncBlockLimit or doc.characterCount() > self.syncCharLimit
-
-    def attachHighlighter(self):
-        if self.highlighter is not None:
+    def _onInitialized(self):
+        if self._ready:
             return
-        self.highlighter = LuauHighlighter(self.document())
+        self._ready = True
+        self.page().runJavaScript(_monacoSetupScript())
 
-        if not self._isLarge():
-            self.highlighter.analyze()
-            self.highlighter.rehighlight()
-            return
+    def toPlainText(self):
+        return self.get_text()
 
-        self.highlighter.progressiveLimit = 0
-        self.highlighter.undefinedRanges = []
-        self.highlighter.unusedRanges = []
-        self._startProgressive()
+    def setPlainText(self, text):
+        self.set_text(text)
 
-    def _startProgressive(self):
-        if self.highlighter is None:
-            return
-        self._progressiveBlock = 0
-        if not self._progressiveTimer.isActive():
-            self._progressiveTimer.start()
+    def setText(self, text):
+        self.set_text(text)
 
-    def _progressiveStep(self):
-        hl = self.highlighter
-        if hl is None:
-            self._progressiveTimer.stop()
-            return
+    def refresh(self):
+        self.page().runJavaScript(
+            "window.qtmonaco && window.qtmonaco.editor && window.qtmonaco.editor.layout()"
+        )
 
-        doc = self.document()
-        total = doc.blockCount()
-        start = self._progressiveBlock
+    def setFocus(self):
+        super().setFocus()
+        self.page().runJavaScript(
+            "window.qtmonaco && window.qtmonaco.editor && window.qtmonaco.editor.focus()"
+        )
 
-        if start >= total:
-            hl.progressiveLimit = None
-            self._progressiveTimer.stop()
-            return
-
-        end = min(start + self.progressiveChunk, total)
-        hl.progressiveLimit = end
-
-        block = doc.findBlockByNumber(start)
-        if block.isValid():
-            hl.rehighlightBlock(block)
-
-        self._progressiveBlock = end
-
-        if end >= total:
-            hl.progressiveLimit = None
-            self._progressiveTimer.stop()
-
-    def _onContentsChanged(self):
-        if self.highlighter is None or self._progressiveTimer.isActive():
-            return
-        self._highlightTimer.start()
-
-    def _runHighlight(self):
-        if self.highlighter is None or self._rehighlighting:
-            return
-        if self._isLarge():
-            return
-        self._rehighlighting = True
-        try:
-            self.highlighter.analyze()
-            self.highlighter.rehighlight()
-        finally:
-            self._rehighlighting = False
-
-    def lineNumberAreaWidth(self):
-        digits = max(1, len(str(self.blockCount())))
-        return 16 + self.fontMetrics().horizontalAdvance("9") * digits
-
-    def updateLineNumberAreaWidth(self, _=0):
-        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
-
-    def updateLineNumberArea(self, rect, dy):
-        if dy:
-            self.lineNumberArea.scroll(0, dy)
-        else:
-            self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
-        if rect.contains(self.viewport().rect()):
-            self.updateLineNumberAreaWidth()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        cr = self.contentsRect()
-        self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
-
-    def lineNumberAreaPaintEvent(self, event):
-        painter = QPainter(self.lineNumberArea)
-        painter.fillRect(event.rect(), QColor("#131313"))
-        block = self.firstVisibleBlock()
-        blockNumber = block.blockNumber()
-        top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
-        bottom = top + self.blockBoundingRect(block).height()
-        painter.setPen(QColor("#4a4a4a"))
-        height = self.fontMetrics().height()
-        while block.isValid() and top <= event.rect().bottom():
-            if block.isVisible() and bottom >= event.rect().top():
-                painter.drawText(0, int(top), self.lineNumberArea.width() - 8, height,
-                                 Qt.AlignmentFlag.AlignRight, str(blockNumber + 1))
-            block = block.next()
-            top = bottom
-            bottom = top + self.blockBoundingRect(block).height()
-            blockNumber += 1
 
 def msgb(icon, title, text, buttons):
     msg = QMessageBox()
@@ -685,7 +505,7 @@ def updateRpc(rpc, gameInfo=None):
             large_text="Funny Executor",
             buttons=[
                 {"label": "Join Discord Server", "url": discordInv},
-                {"label": "Download", "url": "https://github.com"},
+                {"label": "Download", "url": "https://github.com/lowlevelklinti/FunnyExecutor"},
             ],
         )
     except Exception as e:

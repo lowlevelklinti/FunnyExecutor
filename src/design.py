@@ -21,8 +21,8 @@ class Icons:
 
     folder = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"""
 
-    inject = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"/></svg>"""
-
+    inject = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-syringe preview-icon"><path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/></svg>"""
+    
     editorTab = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h8"/><path d="M7 12h10"/><path d="M7 16h6"/></svg>"""
 
     settingsTab = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings preview-icon"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>"""
@@ -340,13 +340,13 @@ class Ui_MainWindow(object):
         self.injectButton.setObjectName(u"injectButton")
         self.injectButton.setFixedSize(34, 30)
         self.injectButton.setToolTip(u"Inject")
-        self.injectButton.setIcon(navIcon(Icons.inject, 18))
+        self.injectButton.setIcon(navIcon(Icons.inject, 18, dim="#ffffff", active="#ffffff"))
         self.injectButton.setIconSize(QSize(18, 18))
         self.executeButton = QPushButton(self.breadcrumb)
         self.executeButton.setObjectName(u"executeButton")
         self.executeButton.setFixedSize(34, 30)
         self.executeButton.setToolTip(u"Execute")
-        self.executeButton.setIcon(navIcon(Icons.execute, 18, dim="#9fd6ab", active="#c8f0d1"))
+        self.executeButton.setIcon(navIcon(Icons.execute, 18, dim="#ffffff", active="#ffffff"))
         self.executeButton.setIconSize(QSize(18, 18))
         crumbLayout.addWidget(self.pathLabel)
         crumbLayout.addStretch()

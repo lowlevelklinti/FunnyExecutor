@@ -228,6 +228,7 @@ class Window(QMainWindow, Ui_MainWindow):
         for act in (self.actionExecute, self.actionInject, self.actionNewTab,
                     self.actionSaveTabs, self.actionImport, self.actionExport,
                     self.actionClearTabs, self.actionExitAltF4):
+            act.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
             self.addAction(act)
 
         self.tabBar.tabCloseRequested.connect(self.closeTab)
@@ -239,7 +240,6 @@ class Window(QMainWindow, Ui_MainWindow):
         self.applyNavState()
 
         self._loadTabs()
-        self.attachCurrentEditor()
 
         self.onTop()
 
@@ -256,8 +256,7 @@ class Window(QMainWindow, Ui_MainWindow):
         self.rpcSwitch.setChecked(rpc_enabled)
         if discord_ok:
             self.rpcSwitch.setToolTip("Show what you're doing on Discord")
-        else:
-            self.rpcSwitch.setToolTip("Discord not detected — start Discord to enable Rich Presence")
+
         self._rpcManager.setEnabled(rpc_enabled)
         self._rpcManager.start()
 
@@ -394,7 +393,8 @@ class Window(QMainWindow, Ui_MainWindow):
         self.editorStack.setCurrentIndex(index)
         editor = self.editorStack.widget(index)
         if editor is not None:
-            editor.attachHighlighter()
+            editor.refresh()
+            editor.setFocus()
         self._updateBreadcrumb()
 
     def _onTabMoved(self, frm, to):
@@ -412,11 +412,6 @@ class Window(QMainWindow, Ui_MainWindow):
             self.pathLabel.setText(u"Funny Executor  \u203a  " + name)
         else:
             self.pathLabel.setText(u"Funny Executor")
-
-    def attachCurrentEditor(self):
-        editor = self.editorStack.currentWidget()
-        if editor is not None:
-            editor.attachHighlighter()
 
     def onTop(self):
         flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
