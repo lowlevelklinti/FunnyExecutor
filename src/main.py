@@ -171,6 +171,8 @@ class Window(QMainWindow, Ui_MainWindow):
         self._tabNumber = 0
         self._lastStatus = None
         self._lastNavState = None
+        self._tabContents = []
+        self._currentTabIndex = -1
         self.sidebarVisible = True
 
         self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
@@ -240,6 +242,9 @@ class Window(QMainWindow, Ui_MainWindow):
         self._refreshTree()
 
         self.applyNavState()
+
+        self._editor = CodeEditor()
+        self.editorStack.addWidget(self._editor)
 
         self._loadTabs()
 
@@ -387,32 +392,34 @@ class Window(QMainWindow, Ui_MainWindow):
         self.injectRequested.emit()
 
     def onExecute(self):
-        editor = self._getCurrentEditor()
-        if editor is None:
+        if self._currentTabIndex < 0:
             return
-        self.executeRequested.emit(editor.toPlainText())
+        self.executeRequested.emit(self._editor.toPlainText())
 
     def onNewTab(self):
         index = self._addTab()
         self.tabBar.setCurrentIndex(index)
 
+    def _syncCurrentContent(self):
+        if 0 <= self._currentTabIndex < len(self._tabContents):
+            self._tabContents[self._currentTabIndex] = self._editor.toPlainText()
+
     def onTabChanged(self, index):
         if index < 0:
             return
-        self.editorStack.setCurrentIndex(index)
-        editor = self.editorStack.widget(index)
-        if editor is not None:
-            editor.refresh()
-            editor.setFocus()
+        self._syncCurrentContent()
+        self._currentTabIndex = index
+        if 0 <= index < len(self._tabContents):
+            self._editor.setPlainText(self._tabContents[index])
+            self._editor.refresh()
+            self._editor.setFocus()
         self._updateBreadcrumb()
 
     def _onTabMoved(self, frm, to):
-        widget = self.editorStack.widget(frm)
-        if widget is None:
-            return
-        self.editorStack.removeWidget(widget)
-        self.editorStack.insertWidget(to, widget)
-        self.editorStack.setCurrentIndex(self.tabBar.currentIndex())
+        self._syncCurrentContent()
+        item = self._tabContents.pop(frm)
+        self._tabContents.insert(to, item)
+        self._currentTabIndex = self.tabBar.currentIndex()
 
     def _updateBreadcrumb(self):
         index = self.tabBar.currentIndex()
@@ -436,11 +443,9 @@ class Window(QMainWindow, Ui_MainWindow):
             "",
             "Luau Script (*.luau; *.lua);;All Files (*)"
         )
-        editor = self._getCurrentEditor()
-
-        if filePath and editor:
+        if filePath and self._currentTabIndex >= 0:
             with open(filePath, 'r', encoding='utf-8') as f:
-                editor.setPlainText(f.read())
+                self._editor.setPlainText(f.read())
 
     def exportLuau(self):
         filePath, _ = QFileDialog.getSaveFileName(
@@ -449,18 +454,16 @@ class Window(QMainWindow, Ui_MainWindow):
             "",
             "Luau source files (*.lua; *.luau);;All Files (*)"
         )
-        editor = self._getCurrentEditor()
-
-        if filePath and editor:
+        if filePath and self._currentTabIndex >= 0:
             with open(filePath, 'w', encoding='utf-8') as f:
-                f.write(editor.toPlainText())
+                f.write(self._editor.toPlainText())
             self._refreshTree()
 
     def closeTab(self, index):
-        widget = self.editorStack.widget(index)
-        if widget is not None:
-            self.editorStack.removeWidget(widget)
-            widget.deleteLater()
+        self._syncCurrentContent()
+        if 0 <= index < len(self._tabContents):
+            self._tabContents.pop(index)
+        self._currentTabIndex = -1
         self.tabBar.removeTab(index)
         if self.tabBar.count() == 0:
             self._tabNumber = 1
@@ -496,14 +499,13 @@ class Window(QMainWindow, Ui_MainWindow):
             pass
 
     def _saveTabs(self):
+        self._syncCurrentContent()
         data = [self._tabNumber]
         for i in range(self.tabBar.count()):
-            editor = self.editorStack.widget(i)
             data.append([
                 self.tabBar.tabText(i),
-                editor.toPlainText() if editor is not None else ""
+                self._tabContents[i] if i < len(self._tabContents) else ""
             ])
-
         with open(appData+'\\tabs.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps(data))
 
@@ -513,10 +515,8 @@ class Window(QMainWindow, Ui_MainWindow):
                 'Are you sure you want to clear all of your tabs? This action cannot be undone.',
                 MessageBox.StandardButton.Yes | MessageBox.StandardButton.No
         ) == MessageBox.StandardButton.Yes:
-            for i in reversed(range(self.editorStack.count())):
-                widget = self.editorStack.widget(i)
-                self.editorStack.removeWidget(widget)
-                widget.deleteLater()
+            self._tabContents.clear()
+            self._currentTabIndex = -1
             while self.tabBar.count() > 0:
                 self.tabBar.removeTab(0)
             self._tabNumber = 1
@@ -524,13 +524,13 @@ class Window(QMainWindow, Ui_MainWindow):
             self.tabBar.setCurrentIndex(newIndex)
 
     def _addTab(self, name=None, content=None):
-        editor = CodeEditor(content)
-
+        from extras import defaultScript
+        if content is None:
+            content = defaultScript
         if name is None:
             self._tabNumber += 1
             name = f'Script #{self._tabNumber}'
-
-        self.editorStack.addWidget(editor)
+        self._tabContents.append(content)
         return self.tabBar.addTab(name)
 
     def _loadTabs(self):
@@ -561,7 +561,9 @@ class Window(QMainWindow, Ui_MainWindow):
             event.ignore()
 
     def _getCurrentEditor(self):
-        return self.editorStack.currentWidget()
+        if self._currentTabIndex >= 0:
+            return self._editor
+        return None
 
 appData = os.environ['APPDATA']+'\\FunnyExecutor'
 scriptsDir = appData+'\\scripts'
