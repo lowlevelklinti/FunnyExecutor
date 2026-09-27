@@ -170,9 +170,14 @@ def comp():
         }
     return {"items": items, "hover": hover, "signatures": signatures}
 
+_cachedSetupScript = None
+
 def _monacoSetupScript():
+    global _cachedSetupScript
+    if _cachedSetupScript is not None:
+        return _cachedSetupScript
     data = json.dumps(comp())
-    return """
+    script = """
 (function () {
     var qt = window.qtmonaco;
     if (!qt || !qt.monaco) { return 'no-monaco'; }
@@ -229,12 +234,32 @@ def _monacoSetupScript():
     });
     monaco.editor.setTheme('funny-dark');
 
+    function isInStringOrComment(model, pos) {
+        var line = model.getValueInRange({
+            startLineNumber: pos.lineNumber, startColumn: 1,
+            endLineNumber: pos.lineNumber, endColumn: pos.column
+        });
+        var q = null;
+        for (var i = 0; i < line.length; i++) {
+            var c = line[i];
+            if (q) {
+                if (c === '\\\\') { i++; continue; }
+                if (c === q) { q = null; }
+            } else {
+                if (c === '"' || c === "'") { q = c; }
+                else if (c === '-' && line[i+1] === '-') { return true; }
+            }
+        }
+        return q !== null;
+    }
+
     var KIND = monaco.languages.CompletionItemKind;
     var SNIPPET = monaco.languages.CompletionItemInsertTextRule;
 
     monaco.languages.registerCompletionItemProvider('lua', {
         triggerCharacters: ['.', ':'],
         provideCompletionItems: function (model, position) {
+            if (isInStringOrComment(model, position)) { return { suggestions: [] }; }
             var word = model.getWordUntilPosition(position);
             var range = {
                 startLineNumber: position.lineNumber,
@@ -260,6 +285,7 @@ def _monacoSetupScript():
 
     monaco.languages.registerHoverProvider('lua', {
         provideHover: function (model, position) {
+            if (isInStringOrComment(model, position)) { return null; }
             var word = model.getWordAtPosition(position);
             if (!word) { return null; }
             var info = DATA.hover[word.word];
@@ -277,6 +303,7 @@ def _monacoSetupScript():
         signatureHelpTriggerCharacters: ['(', ','],
         signatureHelpRetriggerCharacters: [','],
         provideSignatureHelp: function (model, position) {
+            if (isInStringOrComment(model, position)) { return null; }
             var line = model.getValueInRange({
                 startLineNumber: position.lineNumber, startColumn: 1,
                 endLineNumber: position.lineNumber, endColumn: position.column
@@ -325,6 +352,8 @@ def _monacoSetupScript():
     return 'ok';
 })()
 """ % {"data": data}
+    _cachedSetupScript = script
+    return script
 
 class CodeEditor(Monaco):
 

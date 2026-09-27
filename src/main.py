@@ -169,6 +169,8 @@ class Window(QMainWindow, Ui_MainWindow):
         self.setupUi(self)
 
         self._tabNumber = 0
+        self._lastStatus = None
+        self._lastNavState = None
         self.sidebarVisible = True
 
         self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
@@ -306,6 +308,10 @@ class Window(QMainWindow, Ui_MainWindow):
 
     def applyNavState(self):
         showingSettings = self.mainStack.currentWidget() is self.settingsPage
+        navState = (showingSettings, self.sidebarVisible)
+        if navState == self._lastNavState:
+            return
+        self._lastNavState = navState
         self.setNavIcon(self.editorNavBtn, Icons.editorTab, not showingSettings)
         self.setNavIcon(self.filesNavBtn, Icons.folder, self.sidebarVisible)
         self.setNavIcon(self.settingsNavBtn, Icons.settingsTab, showingSettings)
@@ -360,6 +366,9 @@ class Window(QMainWindow, Ui_MainWindow):
 
     @Slot(str)
     def onStatusChanged(self, state):
+        if state == self._lastStatus:
+            return
+        self._lastStatus = state
         if state == 'injected':
             self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
         elif state == 'queued':
