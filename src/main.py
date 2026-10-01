@@ -1,117 +1,434 @@
+"""Funny Executor desktop shell.
+
+Hosts the svelte UI (web/) inside a frameless WebView2 window (pywebview) and
+gives it a native backend:
+
+  * workspace files on disk (%APPDATA%\\FunnyExecutor)
+  * the FAPI executor - inject / execute / client list
+  * the console buffer the injected roblox scripts print into
+  * settings.json, os.startfile, real window controls
+
+    python src/main.py            # build/serve web/dist and open the window
+    python src/main.py --dev      # load the vite dev server instead (hot reload)
+    python src/main.py --debug    # open devtools
+"""
+
+from __future__ import annotations
+
+import argparse
+import ctypes
+import functools
 import json
-import os.path
+import os
 import shutil
+import subprocess
 import sys
+import threading
 import time
-import psutil
+import urllib.request
+from ctypes import wintypes
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-from design import Ui_MainWindow, Icons, svgIcon, navIcon
+import webview
 
-from PySide6.QtCore import QTimer, Qt, QThread, QObject, Signal, Slot, QEvent
-from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QSizeGrip, QTreeWidgetItem
-from extras import CodeEditor, MessageBox, RpcManager
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import FAPI
+from FAPI import bridge
+from luau_api import comp
+from rpc import RpcManager
 
-navDim = "#8a8a8a"
-navActive = "#e6e6e6"
+FOLDERS = ("autoexec", "workspace", "scripts")
+SETTINGS_FILE = "settings.json"
+DEV_URL = "http://localhost:5173/?native=1"
+DEFAULT_SIZE = (1080, 680)
+BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+CREATE_NO_WINDOW = 0x08000000
 
-CLIENT_ID = "1553410003417960469"
+# win32 bits used to get the stock windows minimize/restore animation on a
+# frameless window: without a system menu DWM just makes the window vanish.
+GWL_STYLE = -16
+GWL_WNDPROC = -4
+WS_POPUP = 0x80000000
+WS_OVERLAPPEDWINDOW = 0x00CF0000
+WS_CLIPSIBLINGS = 0x04000000
+WS_CLIPCHILDREN = 0x02000000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
+WM_NCCALCSIZE = 0x0083
+WM_NCHITTEST = 0x0084
+WM_SYSCOMMAND = 0x0112
+SC_MINIMIZE = 0xF020
+SC_RESTORE = 0xF120
+HTCLIENT = 1
+DWMWA_BORDER_COLOR = 34
+DWMWA_COLOR_NONE = 0xFFFFFFFE
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(
+    LRESULT, wintypes.HWND, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM
+)
 
-class RobloxWorker(QObject):
-    statusChanged = Signal(str)
-    showMessage = Signal(str, str, str)
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+_get_window_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+_get_window_long.restype = ctypes.c_longlong
+_get_window_long.argtypes = [wintypes.HWND, ctypes.c_int]
+_set_window_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+_set_window_long.restype = ctypes.c_longlong
+_set_window_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_longlong]
+_call_window_proc = user32.CallWindowProcW
+_call_window_proc.restype = LRESULT
+_call_window_proc.argtypes = [
+    ctypes.c_longlong,
+    wintypes.HWND,
+    ctypes.c_uint,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
+_wndproc_keepalive: list[object] = []
+_framed_windows: set[int] = set()
 
-    def __init__(self):
-        super().__init__()
-        self.executor = None
-        self.sdk = None
-        self.injected = False
-        self.queued = False
+
+def log(*parts: object) -> None:
+    print("[funnyexecutor]", *parts, flush=True)
+
+
+def hwnd_of(window: webview.Window | None) -> int:
+    handle = getattr(getattr(window, "native", None), "Handle", None)
+    if handle is None:
+        return 0
+    return int(handle.ToInt64()) if hasattr(handle, "ToInt64") else int(handle)
+
+
+def enable_window_animations(window: webview.Window | None) -> bool:
+    """DWM only animates minimize/restore for windows that still own a caption.
+
+    A WS_POPUP frameless window just blinks out, so we put the standard
+    overlapped bits back and swallow the non-client area ourselves:
+    WM_NCCALCSIZE -> 0 makes the client area cover the frame (no visible
+    caption), while DWM keeps treating the window as a normal one and
+    animates the taskbar transitions.
+    """
+    hwnd = hwnd_of(window)
+    if not hwnd:
+        return False
+
+    def apply() -> None:
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+
+        if hwnd not in _framed_windows:
+            box: dict[str, int] = {"proc": _get_window_long(hwnd, GWL_WNDPROC)}
+
+            def wndproc(hwnd, msg, wparam, lparam):
+                if msg == WM_NCCALCSIZE and wparam:
+                    return 0
+                if msg == WM_NCHITTEST:
+                    return HTCLIENT
+                return _call_window_proc(box["proc"], hwnd, msg, wparam, lparam)
+
+            proc = WNDPROC(wndproc)
+            _wndproc_keepalive.append(proc)
+            _set_window_long(
+                hwnd, GWL_WNDPROC, ctypes.cast(proc, ctypes.c_void_p).value
+            )
+            _framed_windows.add(hwnd)
+
+        style = _get_window_long(hwnd, GWL_STYLE)
+        wanted = (
+            (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+        )
+        if wanted != style:
+            _set_window_long(hwnd, GWL_STYLE, wanted)
+
+        user32.SetWindowPos(
+            hwnd,
+            None,
+            rect.left,
+            rect.top,
+            width,
+            height,
+            SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+
+        # winforms subtracts the frame it just gained, so hand the original
+        # size back through the form itself - otherwise we end up 16x39 short.
+        form = getattr(window, "native", None)
+        if form is not None:
+            try:
+                current = form.Size
+                if current.Width != width or current.Height != height:
+                    form.Size = type(current)(width, height)
+            except Exception as err:  # pragma: no cover - interop hiccup
+                log("could not restore the window size:", err)
+
+        border = ctypes.c_int(DWMWA_COLOR_NONE)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), DWMWA_BORDER_COLOR, ctypes.byref(border), ctypes.sizeof(border)
+        )
+
+    # pywebview raises shown from its own thread; SetWindowPos and a one shot
+    # form.Size write are both safe from here.
+    apply()
+    return True
+
+
+def app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def workspace_root() -> Path:
+    """Same folder FAPI uses for its file api, so scripts and games agree."""
+    base = Path(os.environ["APPDATA"]) / "FunnyExecutor"
+    base.mkdir(parents=True, exist_ok=True)
+    for folder in FOLDERS:
+        (base / folder).mkdir(exist_ok=True)
+    return base
+
+
+def frontend_candidates() -> list[Path]:
+    candidates = []
+    env = os.environ.get("FE_FRONTEND")
+    if env:
+        candidates.append(Path(env))
+    here = app_dir()
+    candidates += [
+        here.parent / "web" / "dist",
+        here / "web" / "dist",
+        here / "dist",
+    ]
+    return candidates
+
+
+def resolve_frontend() -> Path:
+    candidates = frontend_candidates()
+    for path in candidates:
+        if (path / "index.html").is_file():
+            log("frontend:", path)
+            return path
+
+    for path in candidates:
+        parent = path.parent
+        if (parent / "package.json").is_file() and shutil.which("npm"):
+            log("frontend missing, building:", parent)
+            result = subprocess.run(
+                ["npm", "run", "build"],
+                cwd=parent,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            if result.returncode == 0 and (path / "index.html").is_file():
+                log("frontend built:", path)
+                return path
+
+    raise SystemExit(
+        "web/dist not found. build it first:\n  cd web && npm install && npm run build"
+    )
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def log_message(self, fmt: str, *args: object) -> None:
+        if os.environ.get("FE_HTTP_LOG"):
+            log("http", fmt % args)
+
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+
+def start_server(directory: Path) -> tuple[ThreadingHTTPServer, str]:
+    handler = functools.partial(Handler, directory=str(directory))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    # the ?native=1 flag tells the frontend a python shell is on the other side
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}/?native=1"
+
+
+class Executor:
+    """Threaded Roblox session - owns the FAPI executor and its state.
+
+    The ui talks to this through invoke("inject"/"execute"/"get_status"), it
+    never touches FAPI directly.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._executor = None
+        self._sdk = None
+        self._queued = False
         self._injecting = False
         self._lastInjectTry = 0.0
-        self._timer = None
+        self._state = "idle"
+        self._clients: dict[int, dict] = {}
+        self._running = True
+        self._lastGameKey = None
+        self._rpc = None
 
-    @Slot()
-    def start(self):
-        self._timer = QTimer()
-        self._timer.timeout.connect(self.poll)
-        self._timer.start(250)
+        self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._thread.start()
 
-    @Slot()
-    def stop(self):
-        if self._timer is not None:
-            self._timer.stop()
+    # --- lifecycle ------------------------------------------------------
 
-    def ensureExecutor(self):
-        if self.executor is not None and self.sdk is not None:
+    def stop(self) -> None:
+        self._running = False
+        if self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def _setState(self, state: str) -> None:
+        with self._lock:
+            self._state = state
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            injected = False
+            roblox = False
+            if self._executor is not None:
+                try:
+                    injected = bool(self._executor.injected)
+                except Exception:
+                    injected = False
             try:
-                if psutil.pid_exists(self.sdk.mem.process_id):
-                    return True
-            except:
-                pass
-            self.executor = None
-            self.sdk = None
+                roblox = bool(FAPI.robloxOpen())
+            except Exception:
+                roblox = False
+
+            game = bridge.game_state or {}
+            clients = list(self._clients.values())
+
+            return {
+                "state": self._state,
+                "injected": injected,
+                "roblox": roblox,
+                "pid": clients[0]["pid"] if clients else 0,
+                "placeId": int(game.get("placeId") or 0),
+                "gameName": str(game.get("gameName") or ""),
+                "creator": str(game.get("creator") or ""),
+            }
+
+    def clients(self) -> list[dict]:
+        with self._lock:
+            return list(self._clients.values())
+
+    # --- worker ---------------------------------------------------------
+
+    def _ensureExecutor(self) -> bool:
+        with self._lock:
+            if self._executor is not None and self._sdk is not None:
+                try:
+                    import psutil
+
+                    if psutil.pid_exists(self._sdk.mem.process_id):
+                        return True
+                except Exception:
+                    pass
+                self._executor = None
+                self._sdk = None
 
         try:
             if not FAPI.robloxOpen():
-                self.executor = None
-                self.sdk = None
+                with self._lock:
+                    self._executor = None
+                    self._sdk = None
                 return False
-        except:
-            self.executor = None
-            self.sdk = None
+        except Exception:
             return False
 
         try:
-            self.executor = FAPI.Executor()
-            self.sdk = self.executor.sdk
+            executor = FAPI.Executor()
+            with self._lock:
+                self._executor = executor
+                self._sdk = executor.sdk
             return True
-        except:
-            self.executor = None
-            self.sdk = None
+        except Exception:
+            with self._lock:
+                self._executor = None
+                self._sdk = None
             return False
 
-    @Slot()
-    def poll(self):
+    def _refreshClients(self) -> None:
+        try:
+            import psutil
+        except Exception:
+            return
+
+        found: dict[int, dict] = {}
+        try:
+            for proc in psutil.process_iter(["name", "exe"]):
+                try:
+                    if (proc.info.get("name") or "").lower() != "robloxplayerbeta.exe":
+                        continue
+                except Exception:
+                    continue
+                pid = proc.info.get("pid") or proc.pid
+                found[pid] = {
+                    "id": pid,
+                    "pid": pid,
+                    "username": "roblox",
+                    "displayName": proc.info.get("name") or "RobloxPlayerBeta",
+                    "path": proc.info.get("exe") or "",
+                }
+        except Exception:
+            return
+
+        game = bridge.game_state or {}
+        placeId = game.get("placeId")
+
+        sdkPid = 0
+        with self._lock:
+            if self._sdk is not None:
+                sdkPid = getattr(self._sdk.mem, "process_id", 0) or 0
+
+        for pid, entry in found.items():
+            if pid == sdkPid:
+                # only the process we actually attached to has a known game
+                entry["displayName"] = game.get("gameName") or entry["displayName"]
+                entry["creator"] = game.get("creator") or ""
+                entry["placeId"] = game.get("placeId") or 0
+
+        with self._lock:
+            if set(found) != set(self._clients):
+                self._clients = found
+            elif self._clients:
+                for pid, entry in found.items():
+                    if pid in self._clients:
+                        self._clients[pid] = entry
+
+            key = (placeId, game.get("gameName"), game.get("creator"))
+            if key != self._lastGameKey:
+                self._lastGameKey = key
+                if self._rpc is not None:
+                    self._rpc.setGameState(game)
+
+    def _tryInject(self) -> None:
         if self._injecting:
             return
 
-        if not self.ensureExecutor():
-            self.queued = False
-            self.injected = False
-            self.statusChanged.emit('idle')
-            return
+        with self._lock:
+            executor = self._executor
+            if executor is None:
+                return
+            if self._state == "injected":
+                return
 
         try:
-            self.injected = self.executor.injected
-        except:
-            self.injected = False
-
-        if self.injected:
-            self.statusChanged.emit('injected')
-        elif self.queued:
-            self.statusChanged.emit('queued')
-            self.tryInject()
-        else:
-            self.statusChanged.emit('idle')
-
-    def tryInject(self):
-        if self._injecting or self.injected:
-            return
-
-        try:
-            if self.executor.injected:
+            if executor.injected:
                 return
-            dm = self.sdk.datamodel
-            if not dm or dm.name != 'Ugc' or not dm.address:
+            dm = executor.sdk.datamodel
+            if not dm or dm.name != "Ugc" or not dm.address:
                 return
-            if dm.address in self.executor._handledDms:
+            if dm.address in executor._handledDms:
                 return
-            players = dm.findFirstChild('Players')
+            players = dm.findFirstChild("Players")
             if not players or not players.getChildren():
                 return
-        except:
+        except Exception:
             return
 
         if time.time() - self._lastInjectTry < 1.0:
@@ -120,473 +437,410 @@ class RobloxWorker(QObject):
         self._lastInjectTry = time.time()
         self._injecting = True
         try:
-            self.executor.inject()
-        except Exception as e:
-            print(e)
+            executor.inject()
+        except Exception as err:
+            bridge.consolePush(f"inject failed: {err}", 12)
         finally:
             self._injecting = False
 
-    @Slot()
-    def requestInject(self):
-        if not self.ensureExecutor():
-            self.showMessage.emit('warning', 'Injection failed', 'You must have Roblox open to inject')
-            return
+    def _poll(self) -> None:
+        while self._running:
+            try:
+                self._refreshClients()
+
+                if not self._ensureExecutor():
+                    self._queued = False
+                    self._setState("idle")
+                    time.sleep(0.5)
+                    continue
+
+                try:
+                    injected = bool(self._executor.injected)
+                except Exception:
+                    injected = False
+
+                if injected:
+                    self._setState("injected")
+                elif self._queued:
+                    self._setState("queued")
+                    self._tryInject()
+                else:
+                    self._setState("idle")
+            except Exception:
+                self._setState("idle")
+            time.sleep(0.25)
+
+    # --- ui facing ------------------------------------------------------
+
+    def inject(self) -> dict[str, object]:
+        if not self._ensureExecutor():
+            raise RuntimeError("Open Roblox before injecting")
 
         try:
-            if self.executor.injected:
-                self.showMessage.emit('information', 'Injection failed', 'Already injected')
-                return
-        except:
+            if self._executor.injected:
+                raise RuntimeError("Already injected")
+        except RuntimeError:
+            raise
+        except Exception:
             pass
 
-        self.queued = True
-        self.tryInject()
+        self._queued = True
+        self._tryInject()
 
-    @Slot(str)
-    def requestExecute(self, script):
-        ready = False
-        if self.executor is not None:
-            try:
-                ready = self.executor.injected
-            except:
-                ready = False
+        status = self.status()
+        if not status["injected"]:
+            bridge.consolePush("inject queued, waiting for the game to load...", 14)
+        return status
+
+    def execute(self, source: str) -> dict[str, object]:
+        with self._lock:
+            executor = self._executor
+
+        if executor is None:
+            raise RuntimeError("Inject before executing")
+
+        try:
+            ready = bool(executor.injected)
+        except Exception:
+            ready = False
 
         if not ready:
-            self.showMessage.emit('warning', 'Execution failed', 'You must inject before executing')
-            return
+            raise RuntimeError("You must inject before executing")
 
         try:
-            self.executor.execute(script)
-        except Exception as e:
-            print(e)
+            executor.execute(str(source))
+        except FAPI.ExecutionError as err:
+            raise RuntimeError(str(err)) from err
+        except Exception as err:
+            bridge.consolePush(f"execute failed: {err}", 12)
+            raise RuntimeError(str(err)) from err
 
-class Window(QMainWindow, Ui_MainWindow):
-    injectRequested = Signal()
-    executeRequested = Signal(str)
+        return {"ok": True}
 
-    def __init__(self):
-        super().__init__()
-        self.setupUi(self)
+    def setRpc(self, rpc) -> None:
+        self._rpc = rpc
 
-        self._tabNumber = 0
-        self._lastStatus = None
-        self._lastNavState = None
-        self._tabContents = []
-        self._currentTabIndex = -1
-        self.sidebarVisible = True
 
-        self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
+class Shell:
+    """Everything the web layer can ask the shell to do."""
 
-        self.sizeGrip = QSizeGrip(self)
-        self.sizeGrip.resize(16, 16)
+    def __init__(self, window: webview.Window | None = None) -> None:
+        self.window = window
+        self.root = workspace_root()
+        self._lock = threading.Lock()
+        self.executor = Executor()
+        self.rpc = RpcManager()
+        self.executor.setRpc(self.rpc)
+        log("workspace root:", self.root)
 
-        self.iconRail.installEventFilter(self)
-        self.breadcrumb.installEventFilter(self)
-        self.tabStrip.installEventFilter(self)
-        self.topBar.installEventFilter(self)
+        settings = self.read_settings()
+        discord = self.rpc.discordPresent()
+        general = settings.get("general") if isinstance(settings.get("general"), dict) else {}
+        enabled = bool(general.get("rpcEnabled", settings.get("rpcEnabled", False))) and discord
+        self.rpc.setEnabled(enabled)
+        self.rpc.start()
+        log("discord rpc:", "on" if enabled else "off")
 
-        self._thread = QThread(self)
-        self._worker = RobloxWorker()
-        self._worker.moveToThread(self._thread)
-        self._worker.statusChanged.connect(self.onStatusChanged)
-        self._worker.showMessage.connect(self.onShowMessage)
-        self.injectRequested.connect(self._worker.requestInject)
-        self.executeRequested.connect(self._worker.requestExecute)
-        self._thread.started.connect(self._worker.start)
+    # --- workspace ------------------------------------------------------
 
-        self.injectButton.clicked.connect(self.onInject)
-        self.executeButton.clicked.connect(self.onExecute)
-        self.newTabButton.clicked.connect(self.onNewTab)
+    def _resolve(self, folder: str = "scripts", name: str | None = None) -> Path:
+        target = str(folder or "scripts").lower()
+        if target not in FOLDERS:
+            target = "scripts"
+        path = self.root / target
+        if name is not None:
+            raw = str(name)
+            safe = Path(raw).name
+            if not safe or safe != raw or safe in (".", ".."):
+                raise ValueError(f"bad file name: {raw!r}")
+            path = path / safe
+        return path
 
-        self.redBtn.clicked.connect(self.close)
-        self.yellowBtn.clicked.connect(self.showMinimized)
-        self.greenBtn.clicked.connect(self._toggleMax)
+    def read_workspace_files(self) -> list[dict[str, object]]:
+        files: list[dict[str, object]] = []
+        with self._lock:
+            counter = 100
+            for folder in FOLDERS:
+                for path in sorted((self.root / folder).iterdir()):
+                    if not path.is_file():
+                        continue
+                    try:
+                        content = path.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        content = ""
+                    files.append(
+                        {
+                            "id": counter,
+                            "name": path.name,
+                            "content": content,
+                            "folder": folder,
+                        }
+                    )
+                    counter += 1
+        return files
 
-        self.editorNavBtn.clicked.connect(self.onShowEditor)
-        self.filesNavBtn.clicked.connect(self.onToggleSidebar)
-        self.settingsNavBtn.clicked.connect(self.onShowSettings)
-        self.settingsNavBtn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.settingsNavBtn.customContextMenuRequested.connect(self.onSettingsMenu)
+    def write_workspace_file(self, folder: str, name: str, content: str = "") -> None:
+        path = self._resolve(folder, name)
+        with self._lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
 
-        self.scriptTree.itemDoubleClicked.connect(self._onTreeItemDoubleClicked)
-        self.searchEdit.textChanged.connect(self._onSearch)
+    def remove_workspace_file(self, folder: str, name: str) -> None:
+        path = self._resolve(folder, name)
+        with self._lock:
+            if path.is_file():
+                path.unlink()
 
-        self.actionExitAltF4.triggered.connect(QApplication.quit)
-        self.actionExport.triggered.connect(self.exportLuau)
-        self.actionImport.triggered.connect(self.importLuau)
-        self.actionInject.triggered.connect(self.onInject)
-        self.actionExecute.triggered.connect(self.onExecute)
+    def move_workspace_file(self, from_folder: str, to_folder: str, name: str) -> None:
+        src = self._resolve(from_folder, name)
+        dest = self._resolve(to_folder, name)
+        with self._lock:
+            if not src.is_file():
+                raise FileNotFoundError(src)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
 
-        self.actionNewTab.triggered.connect(lambda: self.onNewTab())
-        self.actionSaveTabs.triggered.connect(lambda: self._saveTabs())
-        self.actionClearTabs.triggered.connect(self._clearTabs)
+    def reveal_folder(self, folder_name: str = "scripts") -> str:
+        path = self._resolve(folder_name)
+        path.mkdir(parents=True, exist_ok=True)
+        os.startfile(path)
+        return str(path)
 
-        self.actionTopMost.triggered.connect(self.onTop)
+    # --- settings -------------------------------------------------------
 
-        self.actionExecute.setShortcut("Ctrl+Return")
-        self.actionInject.setShortcut("Ctrl+I")
-        self.actionNewTab.setShortcut("Ctrl+N")
-        self.actionSaveTabs.setShortcut("Ctrl+S")
-        self.actionImport.setShortcut("Ctrl+O")
-        self.actionExport.setShortcut("Ctrl+Shift+S")
-        for act in (self.actionExecute, self.actionInject, self.actionNewTab,
-                    self.actionSaveTabs, self.actionImport, self.actionExport,
-                    self.actionClearTabs, self.actionExitAltF4):
-            act.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
-            self.addAction(act)
+    def settings_path(self) -> Path:
+        return self.root / SETTINGS_FILE
 
-        self.tabBar.tabCloseRequested.connect(self.closeTab)
-        self.tabBar.currentChanged.connect(self.onTabChanged)
-        self.tabBar.tabMoved.connect(self._onTabMoved)
-
-        self._refreshTree()
-
-        self.applyNavState()
-
-        self._editor = CodeEditor()
-        self.editorStack.addWidget(self._editor)
-
-        self._loadTabs()
-
-        self.onTop()
-
-        self._thread.start()
-
-        self._rpcManager = RpcManager(CLIENT_ID, pollInterval=5.0)
-        self._rpcManager.setExecutor(self._worker)
-
-        discord_ok = self._rpcManager.discordPresent()
-        settings = self._loadSettings()
-        rpc_enabled = bool(settings.get('rpcEnabled', False)) and discord_ok
-        self.rpcSwitch.setEnabled(discord_ok)
-        self.rpcSwitch.toggled.connect(self._onRpcToggled)
-        self.rpcSwitch.setChecked(rpc_enabled)
-        if discord_ok:
-            self.rpcSwitch.setToolTip("Show what you're doing on Discord")
-
-        self._rpcManager.setEnabled(rpc_enabled)
-        self._rpcManager.start()
-
-        self._autosaveTimer = QTimer(self)
-        self._autosaveTimer.timeout.connect(self._saveTabs)
-        self._autosaveTimer.start(10000)
-
-    def eventFilter(self, obj, event):
-        if obj in (self.iconRail, self.breadcrumb, self.tabStrip, self.topBar) and event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
-                handle = self.windowHandle()
-                if handle is not None:
-                    handle.startSystemMove()
-        return super().eventFilter(obj, event)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.sizeGrip.move(self.width() - self.sizeGrip.width(), self.height() - self.sizeGrip.height())
-        self.sizeGrip.raise_()
-
-    def _toggleMax(self):
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
-
-    def onShowEditor(self):
-        self.mainStack.setCurrentWidget(self.editorPage)
-        self.applyNavState()
-
-    def onShowSettings(self):
-        self.mainStack.setCurrentWidget(self.settingsPage)
-        self.applyNavState()
-
-    def onToggleSidebar(self):
-        self.sidebarVisible = not self.sidebarVisible
-        self.sidebar.setVisible(self.sidebarVisible)
-        self.applyNavState()
-
-    def setNavIcon(self, button, svg, active):
-        base = navActive if active else navDim
-        button.setIcon(navIcon(svg, 20, dim=base, active=navActive))
-        button.setChecked(active)
-        button.setProperty('active', 'true' if active else 'false')
-        button.style().unpolish(button)
-        button.style().polish(button)
-
-    def applyNavState(self):
-        showingSettings = self.mainStack.currentWidget() is self.settingsPage
-        navState = (showingSettings, self.sidebarVisible)
-        if navState == self._lastNavState:
-            return
-        self._lastNavState = navState
-        self.setNavIcon(self.editorNavBtn, Icons.editorTab, not showingSettings)
-        self.setNavIcon(self.filesNavBtn, Icons.folder, self.sidebarVisible)
-        self.setNavIcon(self.settingsNavBtn, Icons.settingsTab, showingSettings)
-
-    def onSettingsMenu(self, pos):
-        self.settingsMenu.exec(self.settingsNavBtn.mapToGlobal(pos))
-
-    def _refreshTree(self):
-        self.scriptTree.clear()
-        folderIcon = svgIcon(Icons.folder, "#9a9a9a", 16)
-        fileIcon = svgIcon(Icons.file, "#9a9a9a", 16)
-        for label, folder in (("Scripts", scriptsDir), ("Auto-Execute", autoexecDir), ("Workspace", workspaceDir)):
-            node = QTreeWidgetItem(self.scriptTree, [label])
-            node.setIcon(0, folderIcon)
-            node.setData(0, Qt.ItemDataRole.UserRole, None)
-            try:
-                os.makedirs(folder, exist_ok=True)
-                for name in sorted(os.listdir(folder)):
-                    full = os.path.join(folder, name)
-                    if os.path.isfile(full):
-                        child = QTreeWidgetItem(node, [name])
-                        child.setIcon(0, fileIcon)
-                        child.setData(0, Qt.ItemDataRole.UserRole, full)
-            except:
-                pass
-        self.scriptTree.expandAll()
-
-    def _onTreeItemDoubleClicked(self, item, column):
-        path = item.data(0, Qt.ItemDataRole.UserRole)
-        if not path:
-            return
+    def read_settings(self) -> dict[str, object]:
+        path = self.settings_path()
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except:
-            return
-        index = self._addTab(os.path.basename(path), content)
-        self.tabBar.setCurrentIndex(index)
-
-    def _onSearch(self, text):
-        query = text.lower().strip()
-        for i in range(self.scriptTree.topLevelItemCount()):
-            node = self.scriptTree.topLevelItem(i)
-            visibleChildren = 0
-            for j in range(node.childCount()):
-                child = node.child(j)
-                match = query in child.text(0).lower()
-                child.setHidden(bool(query) and not match)
-                if not child.isHidden():
-                    visibleChildren += 1
-            node.setHidden(bool(query) and visibleChildren == 0)
-
-    @Slot(str)
-    def onStatusChanged(self, state):
-        if state == self._lastStatus:
-            return
-        self._lastStatus = state
-        if state == 'injected':
-            self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
-        elif state == 'queued':
-            self.statusLabel.setStyleSheet("color: rgb(255,165,0);")
-        else:
-            self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
-
-    @Slot(str, str, str)
-    def onShowMessage(self, kind, title, text):
-        if kind == 'information':
-            MessageBox.information(title, text)
-        else:
-            MessageBox.warning(title, text)
-
-    def onInject(self):
-        self.injectRequested.emit()
-
-    def onExecute(self):
-        if self._currentTabIndex < 0:
-            return
-        self.executeRequested.emit(self._editor.toPlainText())
-
-    def onNewTab(self):
-        index = self._addTab()
-        self.tabBar.setCurrentIndex(index)
-
-    def _syncCurrentContent(self):
-        if 0 <= self._currentTabIndex < len(self._tabContents):
-            self._tabContents[self._currentTabIndex] = self._editor.toPlainText()
-
-    def onTabChanged(self, index):
-        if index < 0:
-            return
-        self._syncCurrentContent()
-        self._currentTabIndex = index
-        if 0 <= index < len(self._tabContents):
-            self._editor.setPlainText(self._tabContents[index])
-            self._editor.refresh()
-            self._editor.setFocus()
-        self._updateBreadcrumb()
-
-    def _onTabMoved(self, frm, to):
-        self._syncCurrentContent()
-        item = self._tabContents.pop(frm)
-        self._tabContents.insert(to, item)
-        self._currentTabIndex = self.tabBar.currentIndex()
-
-    def _updateBreadcrumb(self):
-        index = self.tabBar.currentIndex()
-        name = self.tabBar.tabText(index) if index >= 0 else ""
-        if name:
-            self.pathLabel.setText(u"Funny Executor  \u203a  " + name)
-        else:
-            self.pathLabel.setText(u"Funny Executor")
-
-    def onTop(self):
-        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
-        if self.actionTopMost.isChecked():
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        self.show()
-
-    def importLuau(self):
-        filePath, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open File",
-            "",
-            "Luau Script (*.luau; *.lua);;All Files (*)"
-        )
-        if filePath and self._currentTabIndex >= 0:
-            with open(filePath, 'r', encoding='utf-8') as f:
-                self._editor.setPlainText(f.read())
-
-    def exportLuau(self):
-        filePath, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save File",
-            "",
-            "Luau source files (*.lua; *.luau);;All Files (*)"
-        )
-        if filePath and self._currentTabIndex >= 0:
-            with open(filePath, 'w', encoding='utf-8') as f:
-                f.write(self._editor.toPlainText())
-            self._refreshTree()
-
-    def closeTab(self, index):
-        self._syncCurrentContent()
-        if 0 <= index < len(self._tabContents):
-            self._tabContents.pop(index)
-        self._currentTabIndex = -1
-        self.tabBar.removeTab(index)
-        if self.tabBar.count() == 0:
-            self._tabNumber = 1
-            newIndex = self._addTab("Script #1")
-            self.tabBar.setCurrentIndex(newIndex)
-
-    def _shutdownWorker(self):
-        if hasattr(self, '_rpcManager'):
-            self._rpcManager.stop()
-        self._worker.stop()
-        self._thread.quit()
-        self._thread.wait(3000)
-
-    def _onRpcToggled(self, checked):
-        if hasattr(self, '_rpcManager'):
-            self._rpcManager.setEnabled(self.rpcSwitch.isChecked())
-            self._saveSetting('rpcEnabled', self.rpcSwitch.isChecked())
-
-    def _loadSettings(self):
-        try:
-            with open(appData + '\\settings.json', 'r', encoding='utf-8') as f:
-                return json.loads(f.read())
-        except Exception:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except OSError:
             return {}
 
-    def _saveSetting(self, key, value):
-        data = self._loadSettings()
-        data[key] = value
         try:
-            with open(appData + '\\settings.json', 'w', encoding='utf-8') as f:
-                f.write(json.dumps(data))
-        except Exception:
-            pass
+            data = json.loads(raw)
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
 
-    def _saveTabs(self):
-        self._syncCurrentContent()
-        data = [self._tabNumber]
-        for i in range(self.tabBar.count()):
-            data.append([
-                self.tabBar.tabText(i),
-                self._tabContents[i] if i < len(self._tabContents) else ""
-            ])
-        with open(appData+'\\tabs.json', 'w', encoding='utf-8') as f:
-            f.write(json.dumps(data))
+    def write_settings(self, data: object) -> str:
+        if not isinstance(data, dict):
+            raise ValueError("settings must be an object")
 
-    def _clearTabs(self):
-        if MessageBox.question(
-                'FunnyExecutor',
-                'Are you sure you want to clear all of your tabs? This action cannot be undone.',
-                MessageBox.StandardButton.Yes | MessageBox.StandardButton.No
-        ) == MessageBox.StandardButton.Yes:
-            self._tabContents.clear()
-            self._currentTabIndex = -1
-            while self.tabBar.count() > 0:
-                self.tabBar.removeTab(0)
-            self._tabNumber = 1
-            newIndex = self._addTab("Script #1")
-            self.tabBar.setCurrentIndex(newIndex)
+        path = self.settings_path()
+        with self._lock:
+            # the ui only knows about its own sections, so merge on top of what
+            # is already on disk instead of dropping keys it does not manage
+            merged = self.read_settings()
+            merged.update(data)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        return str(path)
 
-    def _addTab(self, name=None, content=None):
-        from extras import defaultScript
-        if content is None:
-            content = defaultScript
-        if name is None:
-            self._tabNumber += 1
-            name = f'Script #{self._tabNumber}'
-        self._tabContents.append(content)
-        return self.tabBar.addTab(name)
+    def set_rpc(self, enabled: bool) -> bool:
+        self.rpc.setEnabled(bool(enabled))
+        # the ui keeps this under general, older files had it at the top level
+        settings = self.read_settings()
+        general = settings.get("general")
+        if not isinstance(general, dict):
+            general = {}
+            settings["general"] = general
+        general["rpcEnabled"] = bool(enabled)
+        settings.pop("rpcEnabled", None)
+        self.write_settings(settings)
+        return self.rpc.isEnabled()
 
-    def _loadTabs(self):
-        if os.path.exists(appData+'\\tabs.json'):
-            with open(appData+'\\tabs.json', 'r', encoding='utf-8') as f:
-                data = json.loads(f.read())
-                self._tabNumber = data.pop(0)
-                for i in data:
-                    self._addTab(i[0], i[1])
-        else:
-            self._addTab()
+    def discord_present(self) -> bool:
+        return self.rpc.discordPresent()
 
-        if self.tabBar.count() > 0:
-            self.tabBar.setCurrentIndex(0)
-            self.onTabChanged(0)
+    # --- executor -------------------------------------------------------
 
-    def closeEvent(self, event):
-        answer = MessageBox.question(
-            "Quit",
-            "Are you sure you want to quit?",
-            MessageBox.StandardButton.Yes | MessageBox.StandardButton.No
+    def status(self) -> dict[str, object]:
+        return self.executor.status()
+
+    def inject(self) -> dict[str, object]:
+        return self.executor.inject()
+
+    def execute(self, source: str) -> dict[str, object]:
+        return self.executor.execute(source)
+
+    def clients(self) -> list[dict]:
+        return self.executor.clients()
+
+    def console_take(self) -> list[dict]:
+        return [{"text": text, "color": color} for text, color in bridge.consoleTake()]
+
+    def console_clear(self) -> int:
+        bridge.consoleClearBuffer()
+        return 0
+
+    def luau_api(self) -> dict:
+        return comp()
+
+    # --- misc native bits ----------------------------------------------
+
+    def open_url(self, url: str) -> None:
+        os.startfile(url)
+
+    def http_get(self, url: str) -> str:
+        request = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.read().decode("utf-8", errors="replace")
+
+    def exclude_from_defender(self) -> None:
+        if os.name != "nt":
+            raise RuntimeError("windows only")
+        script = (
+            "Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait "
+            f"-ArgumentList '-NoProfile','-Command',\"Add-MpPreference "
+            f"-ExclusionPath '{self.root}'\""
         )
-        if answer == MessageBox.StandardButton.Yes:
-            self._saveTabs()
-            self._shutdownWorker()
-            event.accept()
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            creationflags=CREATE_NO_WINDOW,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("cancelled")
+
+    # --- window controls -----------------------------------------------
+
+    def minimize(self) -> None:
+        if not self.window:
+            return
+        hwnd = hwnd_of(self.window)
+        if hwnd:
+            user32.SendMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0)
         else:
-            event.ignore()
+            self.window.minimize()
 
-    def _getCurrentEditor(self):
-        if self._currentTabIndex >= 0:
-            return self._editor
-        return None
+    def restore(self) -> None:
+        if not self.window:
+            return
+        hwnd = hwnd_of(self.window)
+        if hwnd:
+            user32.SendMessageW(hwnd, WM_SYSCOMMAND, SC_RESTORE, 0)
+        else:
+            self.window.restore()
 
-appData = os.environ['APPDATA']+'\\FunnyExecutor'
-scriptsDir = appData+'\\scripts'
-autoexecDir = appData+'\\autoexec'
-workspaceDir = appData+'\\workspace'
+    def maximize(self) -> None:
+        if self.window:
+            self.window.maximize()
 
-if __name__ == '__main__':
+    def close(self) -> None:
+        if self.window:
+            self.window.destroy()
 
-    if not os.path.exists(appData):
-        os.mkdir(appData)
+    def enable_animations(self) -> bool:
+        return enable_window_animations(self.window)
 
-    for sub in (scriptsDir, autoexecDir, workspaceDir):
-        os.makedirs(sub, exist_ok=True)
+    # --- single entry point used by the frontend ------------------------
 
-    if os.path.exists('tabs.json'):
-        shutil.copy('tabs.json', appData + '\\tabs.json')
-        os.remove('tabs.json')
+    def invoke(self, cmd: str, args: dict[str, object] | None = None) -> object:
+        payload = args or {}
+        handlers = {
+            "read_workspace_files": lambda: self.read_workspace_files(),
+            "write_workspace_file": lambda: self.write_workspace_file(
+                str(payload.get("folder", "scripts")),
+                str(payload["name"]),
+                str(payload.get("content", "")),
+            ),
+            "remove_workspace_file": lambda: self.remove_workspace_file(
+                str(payload["folder"]), str(payload["name"])
+            ),
+            "move_workspace_file": lambda: self.move_workspace_file(
+                str(payload["fromFolder"]),
+                str(payload["toFolder"]),
+                str(payload["name"]),
+            ),
+            "reveal_folder": lambda: self.reveal_folder(
+                str(payload.get("folderName", "scripts"))
+            ),
+            "read_settings": lambda: self.read_settings(),
+            "write_settings": lambda: self.write_settings(payload.get("data", {})),
+            "open_url": lambda: self.open_url(str(payload["url"])),
+            "http_get": lambda: self.http_get(str(payload["url"])),
+            "exclude_from_defender": lambda: self.exclude_from_defender(),
+            "get_status": lambda: self.status(),
+            "inject": lambda: self.inject(),
+            "execute": lambda: self.execute(str(payload.get("source", ""))),
+            "get_clients": lambda: self.clients(),
+            "get_console": lambda: self.console_take(),
+            "clear_console": lambda: self.console_clear(),
+            "get_luau_api": lambda: self.luau_api(),
+            "set_rpc": lambda: self.set_rpc(bool(payload.get("enabled", False))),
+            "discord_present": lambda: self.discord_present(),
+        }
+        handler = handlers.get(cmd)
+        if handler is None:
+            raise ValueError(f"unknown command: {cmd}")
+        return handler()
 
-    sys.argv += ['-platform', 'windows:darkmode=2']
-    app = QApplication(sys.argv)
-    app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
 
-    window = Window()
-    app.aboutToQuit.connect(window._shutdownWorker)
-    window.show()
-    sys.exit(app.exec())
+def parse_size(value: str) -> tuple[int, int]:
+    try:
+        width, height = (int(part) for part in value.lower().split("x", 1))
+        return width, height
+    except ValueError:
+        raise argparse.ArgumentTypeError("size must look like 1080x680") from None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="funny executor webview shell")
+    parser.add_argument("--dev", action="store_true", help="use the vite dev server")
+    parser.add_argument("--debug", action="store_true", help="open devtools")
+    parser.add_argument("--size", type=parse_size, default=DEFAULT_SIZE)
+    args = parser.parse_args()
+
+    httpd = None
+    if args.dev:
+        url = DEV_URL
+        log("using dev server:", url)
+    else:
+        httpd, url = start_server(resolve_frontend())
+
+    webview.settings["DRAG_REGION_SELECTOR"] = ".drag-region"
+
+    window = webview.create_window(
+        "Funny Executor",
+        url,
+        width=args.size[0],
+        height=args.size[1],
+        frameless=True,
+        easy_drag=False,
+        background_color="#1a1a1a",
+    )
+    shell = Shell(window)
+    window.expose(
+        shell.invoke,
+        shell.minimize,
+        shell.restore,
+        shell.maximize,
+        shell.close,
+        shell.enable_animations,
+    )
+
+    def on_shown() -> None:
+        # the hwnd only exists once the form is shown
+        shell.enable_animations()
+
+    def on_closed() -> None:
+        log("window closed")
+        shell.executor.stop()
+        shell.rpc.stop()
+        if httpd is not None:
+            threading.Thread(target=httpd.shutdown, daemon=True).start()
+
+    window.events.shown += on_shown
+    window.events.closed += on_closed
+
+    log("starting webview2 at", url)
+    webview.start(debug=args.debug, private_mode=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -8,6 +8,7 @@ import json
 import queue as queueMod
 import shutil
 import subprocess
+from collections import deque
 from http.server import BaseHTTPRequestHandler
 import socketserver
 from threading import Thread, Event, Lock
@@ -16,6 +17,7 @@ from websocket import create_connection, WebSocketConnectionClosedException
 
 initReceivedEvent = Event()
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path, PureWindowsPath
@@ -159,6 +161,31 @@ def cleanupCustomAssets():
 
 _consoleState = {'allocated': False}
 
+# The ui polls consoleTake() and renders these lines in its own console drawer,
+# so rconsoleprint/rconsolewarn never need to pop a separate console window.
+_consoleBuffer: deque = deque(maxlen=2000)
+_consoleLock = Lock()
+
+def consolePush(text: str, color: int = 7):
+    lines = str(text).replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    with _consoleLock:
+        for index, line in enumerate(lines):
+            # callers append their own terminator, so only drop the empty tail
+            # produced by that split and keep genuinely blank lines in the middle
+            if index == len(lines) - 1 and line == '':
+                continue
+            _consoleBuffer.append((line, color))
+
+def consoleTake():
+    with _consoleLock:
+        items = list(_consoleBuffer)
+        _consoleBuffer.clear()
+    return items
+
+def consoleClearBuffer():
+    with _consoleLock:
+        _consoleBuffer.clear()
+
 def consoleEnsure():
     if not _consoleState['allocated']:
         ctypes.windll.kernel32.AllocConsole()
@@ -166,14 +193,21 @@ def consoleEnsure():
     return ctypes.windll.kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
 
 def consoleWrite(text: str, color: int = 7):
-    handle = consoleEnsure()
-    kernel32 = ctypes.windll.kernel32
-    kernel32.SetConsoleTextAttribute(handle, color)
-    written = ctypes.wintypes.DWORD()
-    payload = text.replace('\n', '\r\n')
-    kernel32.WriteConsoleW(handle, ctypes.c_wchar_p(payload), len(payload), ctypes.byref(written), None)
+    consolePush(text, color)
+    # a console window is only useful when the app runs headless (python
+    # src/FAPI/bridge.py), never behind the webview shell
+    if os.environ.get('FE_CONSOLE_WINDOW'):
+        handle = consoleEnsure()
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleTextAttribute(handle, color)
+        written = ctypes.wintypes.DWORD()
+        payload = text.replace('\n', '\r\n')
+        kernel32.WriteConsoleW(handle, ctypes.c_wchar_p(payload), len(payload), ctypes.byref(written), None)
 
 def consoleClear():
+    consoleClearBuffer()
+    if not os.environ.get('FE_CONSOLE_WINDOW'):
+        return
     kernel32 = ctypes.windll.kernel32
     handle = consoleEnsure()
 
@@ -522,6 +556,8 @@ def recvMethod(method, args):
         return b'ok'
 
     elif method == 'rconsoleinput':
+        if not os.environ.get('FE_CONSOLE_WINDOW'):
+            return b'fail'
         return base64.b64encode(consoleInput().encode('utf-8'))
 
     elif method == 'rconsoleclear':
@@ -529,6 +565,8 @@ def recvMethod(method, args):
         return b'ok'
 
     elif method == 'rconsolename':
+        if not os.environ.get('FE_CONSOLE_WINDOW'):
+            return b'ok'
         try:
             title = base64.b64decode(args[0]).decode('utf-8', 'replace')
         except Exception:
@@ -538,6 +576,8 @@ def recvMethod(method, args):
         return b'ok'
 
     elif method in ('rconsoleshow', 'rconsolehide'):
+        if not os.environ.get('FE_CONSOLE_WINDOW'):
+            return b'ok'
         consoleEnsure()
         hwnd = ctypes.windll.kernel32.GetConsoleWindow()
         if hwnd:
@@ -970,7 +1010,18 @@ _targetSource = b'1234'
 port = 9475
 
 def startBridge():
-    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", port), Handler)
+    try:
+        httpd = socketserver.ThreadingTCPServer(("127.0.0.1", port), Handler)
+    except OSError as exc:
+        # the injected payload dials this exact port, so a second instance
+        # cannot fall back to another one - tell the user instead of
+        # dumping a traceback for a plain double launch
+        print(
+            f"[funnyexecutor] port {port} is already in use, another instance "
+            f"is probably still running ({exc})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
     httpd.daemon_threads = True
     Thread(target=httpd.serve_forever, daemon=True).start()
     cleanupCustomAssets()

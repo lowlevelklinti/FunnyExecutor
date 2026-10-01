@@ -4,8 +4,7 @@ pydirectinput
 requests
 pyperclip
 psutil
-PySide6
-qtmonaco
 zstandard
 websocket-client
 pypresence
+pywebview>=6.2
