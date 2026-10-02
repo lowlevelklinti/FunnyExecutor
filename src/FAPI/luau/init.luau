@@ -325,30 +325,41 @@ end
 
 -- funcs
 
-local function requestData()
-	local result, success = nil
+local BRIDGE_TIMEOUT = 30
 
-	local exists, _ = pcall(function()
+local function awaitResult(resultHolder)
+	local deadline = os.time() + BRIDGE_TIMEOUT
+	while resultHolder.result == nil and os.time() < deadline do
+		task.wait()
+	end
+	return resultHolder.result
+end
+
+local function requestData()
+	local holder = {}
+
+	local exists = pcall(function()
 		http:RequestInternal({
 			Url = bridgeServer,
 			Method = "GET",
 			Headers = {
 				['Content-Type'] = "text/plain"
 			}
-		}):Start(function(s,b)
-			result = b
-			result['Success'] = s
+		}):Start(function(s, b)
+			local body = type(b) == 'table' and b or {}
+			body['Success'] = s
+			holder.result = body
 		end)
 	end)
 
-	if not exists then
+	local result = exists and awaitResult(holder) or nil
+
+	if not result then
 		result = {
 			Success = true,
 			Body = workspace.Fallback.Value
 		}
 	end
-
-	repeat task.wait() until result
 
 	if not result or not result.Success then
 		warn('FunnyExecutor -- request error')
@@ -359,11 +370,11 @@ local function requestData()
 end
 
 local function send_method(method, ...)
-	local result, success = nil
+	local holder = {}
 
 	local body = table.concat({method, ...}, '\n')
 
-	local exists, _ = pcall(function()
+	local exists = pcall(function()
 		http:RequestInternal({
 			Url = bridgeServer,
 			Method = "POST",
@@ -371,22 +382,21 @@ local function send_method(method, ...)
 			Headers = {
 				['Content-Type'] = "text/plain"
 			}
-		}):Start(function(s,b)
-			result = b
-			result['Success'] = s
+		}):Start(function(s, b)
+			local response = type(b) == 'table' and b or {}
+			response['Success'] = s
+			holder.result = response
 		end)
 	end)
 
-	if not exists then
-		result = {
-			Success = true,
-			Body = workspace.Fallback.Value
-		}
+	local result = exists and awaitResult(holder) or nil
+
+	if not result then
+		warn('FunnyExecutor -- bridge timeout: ' .. tostring(method))
+		return nil
 	end
 
-	repeat task.wait() until result
-
-	if not result or not result.Success then
+	if not result.Success then
 		warn('FunnyExecutor -- request error')
 		return nil
 	end
@@ -1685,7 +1695,7 @@ local function clone_target(proxy)
 	return obj
 end
 
-local cloneref = function(obj)
+cloneref = function(obj)
 	local proxy = newproxy(true)
 	local meta = getmetatable(proxy)
 	clonerefs[proxy] = obj
@@ -2787,6 +2797,8 @@ end
 
 -- instance properties
 
+local scriptableOverrides = setmetatable({}, {__mode = 'k'})
+
 local NOT_SCRIPTABLE = "is not a scriptable property."
 local NOT_A_PROPERTY = "is not a valid property name."
 
@@ -2813,6 +2825,14 @@ end
 isscriptable = function(instance, property)
 	check_instance_argument('isscriptable', instance, 1)
 	check_property_argument('isscriptable', property, 2)
+
+	local override = scriptableOverrides[instance]
+	if type(override) == 'table' then
+		local forced = override[property]
+		if type(forced) == 'boolean' then
+			return forced
+		end
+	end
 
 	local ok, err = pcall(function()
 		return game.GetPropertyChangedSignal(instance, property)
@@ -3389,6 +3409,769 @@ end
 
 get_hidden_gui = gethui
 
+-- raw metatables
+
+local executorChunkSource
+do
+	local sourceOk, source = pcall(real_debug_info, 1, 's')
+	executorChunkSource = sourceOk and type(source) == 'string' and source or nil
+end
+
+local function metamethodProbe(object)
+	local metamethods = {}
+
+	xpcall(function()
+		return object._
+	end, function()
+		metamethods.__index = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		object._ = object
+	end, function()
+		metamethods.__newindex = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object:___()
+	end, function()
+		metamethods.__namecall = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		object()
+	end, function()
+		metamethods.__call = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		for _ in object do
+		end
+	end, function()
+		metamethods.__iter = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return #object
+	end, function()
+		metamethods.__len = real_debug_info(2, 'f')
+	end)
+
+	local arithmeticProbe = {}
+
+	xpcall(function()
+		return object == object
+	end, function()
+		metamethods.__eq = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object + arithmeticProbe
+	end, function()
+		metamethods.__add = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object - arithmeticProbe
+	end, function()
+		metamethods.__sub = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object * arithmeticProbe
+	end, function()
+		metamethods.__mul = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object / arithmeticProbe
+	end, function()
+		metamethods.__div = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object // arithmeticProbe
+	end, function()
+		metamethods.__idiv = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object % arithmeticProbe
+	end, function()
+		metamethods.__mod = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object ^ arithmeticProbe
+	end, function()
+		metamethods.__pow = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return -object
+	end, function()
+		metamethods.__unm = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object < arithmeticProbe
+	end, function()
+		metamethods.__lt = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object <= arithmeticProbe
+	end, function()
+		metamethods.__le = real_debug_info(2, 'f')
+	end)
+
+	xpcall(function()
+		return object .. arithmeticProbe
+	end, function()
+		metamethods.__concat = real_debug_info(2, 'f')
+	end)
+
+	metamethods.__type = typeof(object)
+	metamethods.__tostring = function()
+		return tostring(object)
+	end
+
+	return metamethods
+end
+
+debug.getmetatable = function(value)
+	local result = getmetatable(value)
+	if result == nil then
+		return nil
+	end
+	if type(result) == 'table' then
+		local unlocked = pcall(setmetatable, value, result)
+		if unlocked then
+			return result
+		end
+	end
+	return metamethodProbe(value)
+end
+
+debug.setmetatable = setmetatable
+
+getrawmetatable = function(object)
+	assert(type(object) == 'table' or type(object) == 'userdata', "invalid argument #1 to 'getrawmetatable' (table or userdata expected, got " .. type(object) .. ')', 2)
+	local rawMeta = debug.getmetatable(object)
+	if type(rawMeta) == 'table' and rawMeta.__metatable ~= nil then
+		local lock = rawMeta.__metatable
+		rawMeta.__metatable = nil
+		local unlocked = debug.getmetatable(object)
+		rawMeta.__metatable = lock
+		return unlocked
+	end
+	return rawMeta
+end
+
+setrawmetatable = function(object, newMeta)
+	assert(type(object) == 'table' or type(object) == 'userdata', "invalid argument #1 to 'setrawmetatable' (table or userdata expected, got " .. type(object) .. ')', 2)
+	assert(type(newMeta) == 'table' or type(newMeta) == 'nil', "invalid argument #2 to 'setrawmetatable' (table or nil expected, got " .. type(newMeta) .. ')', 2)
+	local rawMeta = debug.getmetatable(object)
+	if type(rawMeta) == 'table' and rawMeta.__metatable ~= nil then
+		local lock = rawMeta.__metatable
+		rawMeta.__metatable = nil
+		local ok, err = pcall(setmetatable, object, newMeta)
+		rawMeta.__metatable = lock
+		if not ok then
+			error('failed to set metatable : ' .. tostring(err), 2)
+		end
+		return true
+	end
+	local ok, err = pcall(setmetatable, object, newMeta)
+	if not ok then
+		error('failed to set metatable : ' .. tostring(err), 2)
+	end
+	return true
+end
+
+hookmetamethod = function(object, method, func)
+	assert(type(object) == 'table' or type(object) == 'userdata', "invalid argument #1 to 'hookmetamethod' (table or userdata expected, got " .. type(object) .. ')', 2)
+	assert(type(method) == 'string', "invalid argument #2 to 'hookmetamethod' (string expected, got " .. type(method) .. ')', 2)
+	assert(type(func) == 'function', "invalid argument #3 to 'hookmetamethod' (function expected, got " .. type(func) .. ')', 2)
+	local meta = debug.getmetatable(object)
+	if type(meta) ~= 'table' then
+		error('unable to hook metamethod: no accessible metatable', 2)
+	end
+	local original = meta[method]
+	meta[method] = func
+	return original
+end
+
+debug.getinfo = function(target, options)
+	local what = type(options) == 'string' and string.lower(options) or 'sflnu'
+	local subject = target
+	if type(target) == 'number' then
+		local resolvedOk, resolved = pcall(real_debug_info, target + 1, 'f')
+		subject = resolvedOk and resolved or nil
+	end
+
+	if type(subject) ~= 'function' then
+		return {}
+	end
+
+	local result = {}
+	for index = 1, #what do
+		local option = string.sub(what, index, index)
+		if option == 's' then
+			local shortSrc = real_debug_info(subject, 's')
+			result.short_src = shortSrc
+			result.source = '=' .. tostring(shortSrc)
+			result.what = shortSrc == '[C]' and 'C' or 'Lua'
+		elseif option == 'f' then
+			result.func = real_debug_info(subject, 'f')
+		elseif option == 'l' then
+			result.currentline = real_debug_info(subject, 'l')
+		elseif option == 'n' then
+			result.name = real_debug_info(subject, 'n')
+		elseif option == 'a' or option == 'u' then
+			local numparams, isVararg = real_debug_info(subject, 'a')
+			result.numparams = numparams
+			result.is_vararg = isVararg and 1 or 0
+			if option == 'u' then
+				local upvaluesOk, upvalues = pcall(getupvalues, subject)
+				result.nups = upvaluesOk and type(upvalues) == 'table' and #upvalues or 0
+			end
+		end
+	end
+	return result
+end
+
+checkcaller = function()
+	local funcOk, func = pcall(real_debug_info, 2, 'f')
+	if not funcOk or type(func) ~= 'function' then
+		return false
+	end
+
+	local registry = vm_registry('__funny_gc_registry')
+	if type(registry) == 'table' and registry[func] == true then
+		return true
+	end
+
+	if executorChunkSource == nil then
+		return false
+	end
+
+	local sourceOk, source = pcall(real_debug_info, 2, 's')
+	return sourceOk and source == executorChunkSource
+end
+
+-- closure hooks
+
+local hookOriginals = setmetatable({}, {__mode = 'k'})
+
+local function replaceInTable(tbl, target, replacement)
+	local changed = 0
+	if type(tbl) ~= 'table' then
+		return changed
+	end
+	pcall(function()
+		for key, value in pairs(tbl) do
+			if value == target then
+				rawset(tbl, key, replacement)
+				changed += 1
+			end
+		end
+	end)
+	return changed
+end
+
+hookfunction = function(target, replacement)
+	assert(type(target) == 'function', "invalid argument #1 to 'hookfunction' (function expected, got " .. type(target) .. ')', 2)
+	assert(type(replacement) == 'function', "invalid argument #2 to 'hookfunction' (function expected, got " .. type(replacement) .. ')', 2)
+
+	local original = hookOriginals[target] or target
+	hookOriginals[replacement] = original
+
+	local changed = 0
+	local callerOk, caller = pcall(real_debug_info, 2, 'f')
+	if callerOk and type(caller) == 'function' then
+		local envOk, env = pcall(getfenv, caller)
+		if envOk and type(env) == 'table' then
+			changed += replaceInTable(env, target, replacement)
+		end
+	end
+
+	changed += replaceInTable(genv_table, target, replacement)
+	changed += replaceInTable(host_env, target, replacement)
+
+	for _, scriptInstance in ipairs(getscripts()) do
+		local envOk, env = pcall(getsenv, scriptInstance)
+		if envOk and type(env) == 'table' then
+			changed += replaceInTable(env, target, replacement)
+		end
+	end
+
+	if changed == 0 then
+		local deadline = os.clock() + 3
+		for _, object in ipairs(getgc(true)) do
+			if type(object) == 'table' then
+				changed += replaceInTable(object, target, replacement)
+				if os.clock() > deadline then
+					break
+				end
+			end
+		end
+	end
+
+	return original
+end
+
+replaceclosure = hookfunction
+
+clonefunction = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'clonefunction' (function expected, got " .. type(func) .. ')', 2)
+	local clone = function(...)
+		return func(...)
+	end
+	hookOriginals[clone] = hookOriginals[func] or func
+	return clone
+end
+
+newlclosure = function(func)
+	assert(type(func) == 'function', "invalid argument #1 to 'newlclosure' (function expected, got " .. type(func) .. ')', 2)
+	return function(...)
+		return func(...)
+	end
+end
+
+-- scripts and modules
+
+getrunningscripts = function()
+	local result = {}
+	for _, inst in ipairs(all_known_instances()) do
+		local runningOk, running = pcall(function()
+			if inst:IsA('LocalScript') then
+				return inst.Enabled == true
+			end
+			if inst.ClassName == 'Script' then
+				return inst.RunContext == Enum.RunContext.Client and inst.Enabled == true
+			end
+			return false
+		end)
+		if runningOk and running then
+			result[#result + 1] = inst
+		end
+	end
+	return result
+end
+
+getloadedmodules = function()
+	local result = {}
+	for _, inst in ipairs(all_known_instances()) do
+		local moduleOk, isModule = pcall(function()
+			return inst:IsA('ModuleScript')
+		end)
+		if moduleOk and isModule then
+			result[#result + 1] = inst
+		end
+	end
+	return result
+end
+
+-- input firing
+
+local virtualInput = nil
+
+local function virtual_input()
+	if virtualInput ~= nil then
+		return virtualInput
+	end
+	local createdOk, created = pcall(function()
+		return Instance.new('VirtualInputManager')
+	end)
+	if createdOk and typeof(created) == 'Instance' then
+		virtualInput = created
+	end
+	return virtualInput
+end
+
+fireclickdetector = function(detector, distance)
+	assert(typeof(detector) == 'Instance', "invalid argument #1 to 'fireclickdetector' (Instance expected, got " .. typeof(detector) .. ')', 2)
+	assert(detector:IsA('ClickDetector'), "invalid argument #1 to 'fireclickdetector' (ClickDetector expected, got " .. detector.ClassName .. ')', 2)
+
+	local part = detector.Parent
+	if typeof(part) ~= 'Instance' or not part:IsA('BasePart') then
+		return false
+	end
+
+	local camera = workspace.CurrentCamera
+	if typeof(camera) ~= 'Instance' then
+		return false
+	end
+
+	local projectedOk, screen, onScreen = pcall(function()
+		return camera:WorldToViewportPoint(part.Position)
+	end)
+	if not projectedOk or not onScreen then
+		return false
+	end
+
+	local limit = detector.MaxActivationDistance
+	if type(distance) == 'number' and limit ~= nil then
+		local player = game:GetService('Players').LocalPlayer
+		local character = player ~= nil and player.Character or nil
+		local root = character ~= nil and character:FindFirstChild('HumanoidRootPart') or nil
+		if root ~= nil and (root.Position - part.Position).Magnitude > distance then
+			return false
+		end
+	end
+
+	local input = virtual_input()
+	if input == nil then
+		return false
+	end
+
+	pcall(function()
+		input:SendMouseMoveEvent(screen.X, screen.Y, game)
+		input:SendMouseButtonEvent(screen.X, screen.Y, 0, true, game, false)
+	end)
+	task.wait()
+	pcall(function()
+		input:SendMouseButtonEvent(screen.X, screen.Y, 0, false, game, false)
+	end)
+	return true
+end
+
+local touchOrigins = setmetatable({}, {__mode = 'k'})
+
+firetouchinterest = function(part, toTouch, toggle)
+	assert(typeof(part) == 'Instance', "invalid argument #1 to 'firetouchinterest' (Instance expected, got " .. typeof(part) .. ')', 2)
+	assert(typeof(toTouch) == 'Instance', "invalid argument #2 to 'firetouchinterest' (Instance expected, got " .. typeof(toTouch) .. ')', 2)
+
+	local mode = math.floor(tonumber(toggle) or 1)
+
+	if mode == 1 then
+		if touchOrigins[part] == nil then
+			local originOk, origin = pcall(function()
+				return part.CFrame
+			end)
+			if originOk then
+				touchOrigins[part] = origin
+			end
+		end
+		local targetOk, targetCFrame = pcall(function()
+			return toTouch.CFrame
+		end)
+		if not targetOk or targetCFrame == nil then
+			return false
+		end
+		pcall(function()
+			part.CFrame = targetCFrame
+		end)
+		task.wait()
+		task.wait()
+		return true
+	end
+
+	local origin = touchOrigins[part]
+	if origin ~= nil then
+		pcall(function()
+			part.CFrame = origin
+		end)
+		touchOrigins[part] = nil
+		task.wait()
+		task.wait()
+	end
+	return true
+end
+
+fireproximityprompt = function(prompt, amount, skip)
+	assert(typeof(prompt) == 'Instance', "invalid argument #1 to 'fireproximityprompt' (Instance expected, got " .. typeof(prompt) .. ')', 2)
+	assert(prompt:IsA('ProximityPrompt'), "invalid argument #1 to 'fireproximityprompt' (ProximityPrompt expected, got " .. prompt.ClassName .. ')', 2)
+
+	local count = math.max(1, math.floor(tonumber(amount) or 1))
+	for index = 1, count do
+		prompt:InputHoldBegin()
+		if skip == true then
+			task.wait()
+		else
+			task.wait(prompt.HoldDuration)
+		end
+		prompt:InputHoldEnd()
+		if index < count then
+			task.wait()
+		end
+	end
+	return true
+end
+
+-- properties
+
+local apiDumpFile = 'funny_api_dump.json'
+local apiDumpValue = nil
+local apiDumpClasses = nil
+local apiDumpAttempted = false
+
+local function loadApiDump()
+	if apiDumpValue ~= nil or apiDumpAttempted then
+		return apiDumpValue
+	end
+	apiDumpAttempted = true
+
+	pcall(function()
+		if isfile(apiDumpFile) then
+			local cached = readfile(apiDumpFile)
+			if type(cached) == 'string' and #cached > 0 then
+				apiDumpValue = http:JSONDecode(cached)
+			end
+		end
+	end)
+
+	if type(apiDumpValue) ~= 'table' then
+		apiDumpValue = nil
+		pcall(function()
+			local raw = httpget('https://raw.githubusercontent.com/CloneTrooper1019/Roblox-Client-Tracker/roblox/API-Docs/en-us.json')
+			if type(raw) == 'string' and #raw > 0 then
+				local decoded = http:JSONDecode(raw)
+				if type(decoded) == 'table' then
+					apiDumpValue = decoded
+					pcall(writefile, apiDumpFile, raw)
+				end
+			end
+		end)
+	end
+
+	return apiDumpValue
+end
+
+local function memberHidden(member)
+	local tags = rawget(member, 'Tags')
+	if type(tags) == 'table' then
+		for _, tag in ipairs(tags) do
+			if tag == 'Hidden' or tag == 'NotScriptable' or tag == 'ReadOnly' then
+				return true
+			end
+		end
+	end
+
+	local security = rawget(member, 'Security')
+	if type(security) == 'string' then
+		return security ~= 'None'
+	end
+	if type(security) == 'table' then
+		return rawget(security, 'Read') ~= 'None' or rawget(security, 'Write') ~= 'None'
+	end
+	return false
+end
+
+local function dumpProperties(className)
+	local dump = loadApiDump()
+	if type(dump) ~= 'table' then
+		apiDumpClasses = nil
+		return nil
+	end
+
+	if apiDumpClasses == nil then
+		local classes = rawget(dump, 'Classes')
+		if type(classes) ~= 'table' then
+			return nil
+		end
+		local byName = {}
+		for _, entry in ipairs(classes) do
+			if type(entry) == 'table' and type(rawget(entry, 'Name')) == 'string' then
+				byName[rawget(entry, 'Name')] = entry
+			end
+		end
+		apiDumpClasses = byName
+	end
+
+	local entries = {}
+	local seen = {}
+	local current = apiDumpClasses[className]
+	local guard = 0
+
+	while type(current) == 'table' and guard < 64 do
+		guard += 1
+		local members = rawget(current, 'Members')
+		if type(members) == 'table' then
+			for _, member in ipairs(members) do
+				if type(member) == 'table' and rawget(member, 'MemberType') == 'Property' then
+					local name = rawget(member, 'Name')
+					if type(name) == 'string' and seen[name] == nil then
+						seen[name] = true
+						entries[#entries + 1] = {
+							Name = name,
+							Hidden = memberHidden(member),
+						}
+					end
+				end
+			end
+		end
+		local superclass = rawget(current, 'Superclass')
+		current = type(superclass) == 'string' and apiDumpClasses[superclass] or nil
+	end
+
+	return entries
+end
+
+getproperties = function(instance)
+	assert(typeof(instance) == 'Instance', "invalid argument #1 to 'getproperties' (Instance expected, got " .. typeof(instance) .. ')', 2)
+	local entries = dumpProperties(instance.ClassName)
+	if entries == nil then
+		return nil
+	end
+	local result = {}
+	for _, entry in ipairs(entries) do
+		local readOk, value = pcall(function()
+			return instance[entry.Name]
+		end)
+		if readOk then
+			result[entry.Name] = value
+		end
+	end
+	return result
+end
+
+gethiddenproperties = function(instance)
+	assert(typeof(instance) == 'Instance', "invalid argument #1 to 'gethiddenproperties' (Instance expected, got " .. typeof(instance) .. ')', 2)
+	local entries = dumpProperties(instance.ClassName)
+	if entries == nil then
+		return nil
+	end
+	local result = {}
+	for _, entry in ipairs(entries) do
+		if entry.Hidden then
+			local readOk, value = pcall(function()
+				return instance[entry.Name]
+			end)
+			if readOk then
+				result[entry.Name] = value
+			end
+		end
+	end
+	return result
+end
+
+gethiddenproperty = function(instance, property)
+	assert(typeof(instance) == 'Instance', "invalid argument #1 to 'gethiddenproperty' (Instance expected, got " .. typeof(instance) .. ')', 2)
+	assert(type(property) == 'string', "invalid argument #2 to 'gethiddenproperty' (string expected, got " .. type(property) .. ')', 2)
+	local readOk, value = pcall(function()
+		return instance[property]
+	end)
+	if not readOk then
+		return nil, false
+	end
+	local scriptableOk, scriptable = pcall(isscriptable, instance, property)
+	return value, scriptableOk and scriptable == false
+end
+
+setscriptable = function(instance, property, bool)
+	assert(typeof(instance) == 'Instance', "invalid argument #1 to 'setscriptable' (Instance expected, got " .. typeof(instance) .. ')', 2)
+	assert(type(property) == 'string', "invalid argument #2 to 'setscriptable' (string expected, got " .. type(property) .. ')', 2)
+	local previous = isscriptable(instance, property)
+	local store = scriptableOverrides[instance]
+	if store == nil then
+		store = {}
+		scriptableOverrides[instance] = store
+	end
+	store[property] = bool == true
+	return previous
+end
+
+-- console
+
+rconsolecreate = function()
+	send_method('rconsolecreate')
+end
+
+rconsoledestroy = function()
+	send_method('rconsoledestroy')
+end
+
+rconsolesettitle = function(title)
+	send_method('rconsolesettitle', base64encode(tostring(title)))
+end
+
+consolecreate = rconsolecreate
+consoledestroy = rconsoledestroy
+consolesettitle = rconsolesettitle
+
+-- misc
+
+gethwid = function()
+	local response = send_method('gethwid')
+	if type(response) ~= 'string' or response == '' then
+		return nil
+	end
+	return response:gsub('\n', '')
+end
+get_hwid = gethwid
+
+whatexecutor = identifyexecutor
+
+dofile = function(path)
+	assert(type(path) == 'string', "invalid argument #1 to 'dofile' (string expected, got " .. type(path) .. ')', 2)
+	local readOk, source = pcall(readfile, path)
+	if not readOk or type(source) ~= 'string' then
+		error("dofile: cannot read '" .. tostring(path) .. "'", 2)
+	end
+	local func, err = loadstring(source, '=' .. path)
+	if type(func) ~= 'function' then
+		error('dofile: ' .. tostring(err), 2)
+	end
+	return func()
+end
+
+disassemble = decompile
+
+GetObjects = function(url)
+	assert(type(url) == 'string', "invalid argument #1 to 'GetObjects' (string expected, got " .. type(url) .. ')', 2)
+	return game:GetService('InsertService'):LoadLocalAsset(url)
+end
+
+HttpPost = function(url, body, headers)
+	assert(type(url) == 'string', "invalid argument #1 to 'HttpPost' (string expected, got " .. type(url) .. ')', 2)
+	local result = request({
+		Url = url,
+		Method = 'POST',
+		Body = type(body) == 'string' and body or tostring(body),
+		Headers = headers,
+	})
+	if type(result) ~= 'table' then
+		return nil
+	end
+	return result.Body
+end
+
+isnetworkowner = function(part)
+	assert(typeof(part) == 'Instance', "invalid argument #1 to 'isnetworkowner' (Instance expected, got " .. typeof(part) .. ')', 2)
+	if part.Anchored then
+		return false
+	end
+	return part.ReceiveAge == 0
+end
+
+compareinstances = function(left, right)
+	return left == right
+end
+
+deepclone = function(value)
+	local lookup = {}
+	local function copy(object)
+		if type(object) ~= 'table' then
+			return object
+		end
+		if lookup[object] then
+			return lookup[object]
+		end
+		local clone = {}
+		lookup[object] = clone
+		for key, item in pairs(object) do
+			clone[copy(key)] = copy(item)
+		end
+		return setmetatable(clone, getmetatable(object))
+	end
+	return copy(value)
+end
+
+host_env.lz4 = lz4
+hash = crypt.hash
+
 -- main loop
 
 task.spawn(function()
@@ -3419,6 +4202,35 @@ pcall(function()
 	end
 end)
 rawset(genv_table, '_G', genv_table)
+
+do
+	local realPrint = rawget(genv_table, 'print') or print
+	local realWarn = rawget(genv_table, 'warn') or warn
+
+	local function formatArgs(...)
+		local parts = table.create(select('#', ...))
+		for index = 1, select('#', ...) do
+			parts[index] = tostring((select(index, ...)))
+		end
+		return table.concat(parts, '\t')
+	end
+
+	local function mirror(sink, useWarn, ...)
+		pcall(sink, ...)
+		local text = formatArgs(...)
+		pcall(function()
+			send_method(useWarn and 'rconsolewarn' or 'rconsoleprint', base64encode(text))
+		end)
+	end
+
+	rawset(genv_table, 'print', function(...)
+		mirror(realPrint, false, ...)
+	end)
+
+	rawset(genv_table, 'warn', function(...)
+		mirror(realWarn, true, ...)
+	end)
+end
 
 task.spawn(function()
 	while task.wait() do
