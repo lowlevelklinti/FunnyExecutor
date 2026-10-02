@@ -613,8 +613,9 @@ def recvMethod(method, args):
     elif method == 'decompile':
         try:
             r = requests.post(
-                'https://api.lua.expert/decompile',
-                json={'script': args[0].decode('ascii')},
+                'https://api.luacid.dev/decompile',
+                data=base64.b64decode(args[0]),
+                headers={'Content-Type': 'application/octet-stream'},
                 timeout=30
             )
         except requests.RequestException:
