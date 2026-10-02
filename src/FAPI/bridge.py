@@ -427,6 +427,22 @@ def recvMethod(method, args):
     elif method == 'getclipboard':
         return pyperclip.paste().encode('utf-8')
 
+    elif method == 'gethwid':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography')
+            machineGuid, _ = winreg.QueryValueEx(key, 'MachineGuid')
+            winreg.CloseKey(key)
+        except Exception:
+            machineGuid = ''
+        try:
+            import uuid as uuidMod
+            macAddress = uuidMod.getnode()
+        except Exception:
+            macAddress = 0
+        raw = '%s:%s:%s' % (machineGuid, macAddress, os.environ.get('USERNAME', ''))
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest().encode('ascii')
+
     elif method == 'compile':
         try:
             source = base64.b64decode(args[0])
@@ -437,8 +453,12 @@ def recvMethod(method, args):
             return b'fail'
         try:
             return base64.b64encode(Luau.compile(source, chunkName))
+        except BytecodeError as e:
+            return b'fail\n' + str(e).replace('Luau compile error:\n', '').encode('utf-8', 'replace')
         except subprocess.CalledProcessError as e:
             return b'fail\n' + (e.stderr or b'compile error').strip()
+        except Exception:
+            return b'fail\ncompile error'
 
     elif method == 'getsynsaveinstance':
         source = synSaveInstanceRead()
@@ -531,6 +551,31 @@ def recvMethod(method, args):
     elif method == 'rconsolename':
         try:
             title = base64.b64decode(args[0]).decode('utf-8', 'replace')
+        except Exception:
+            return b'fail'
+        consoleEnsure()
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+        return b'ok'
+
+    elif method == 'rconsolecreate':
+        consoleEnsure()
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 5)
+        return b'ok'
+
+    elif method == 'rconsoledestroy':
+        try:
+            if _consoleState['allocated']:
+                ctypes.windll.kernel32.FreeConsole()
+                _consoleState['allocated'] = False
+        except Exception:
+            return b'fail'
+        return b'ok'
+
+    elif method == 'rconsolesettitle':
+        try:
+            title = base64.b64decode(args[0]).decode('utf-8', 'replace') if args and args[0] else 'FunnyExecutor'
         except Exception:
             return b'fail'
         consoleEnsure()
@@ -958,7 +1003,10 @@ class Handler(BaseHTTPRequestHandler):
         args = bodyData.split(b'\n')
         method = args.pop(0).decode('utf-8')
 
-        response = recvMethod(method, args)
+        try:
+            response = recvMethod(method, args)
+        except Exception as e:
+            response = b'fail\n' + str(e).encode('utf-8', 'replace')
 
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
