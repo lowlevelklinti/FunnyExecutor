@@ -2785,6 +2785,46 @@ setreadonly = function(tbl, readonly)
 	return tbl
 end
 
+-- instance properties
+
+local NOT_SCRIPTABLE = "is not a scriptable property."
+local NOT_A_PROPERTY = "is not a valid property name."
+
+local function check_instance_argument(name, value, index)
+	assert(
+		typeof(value) == 'Instance',
+		"invalid argument #" .. index .. " to '" .. name .. "' (Instance expected, got " .. typeof(value) .. ")",
+		2
+	)
+end
+
+local function check_property_argument(name, value, index)
+	assert(
+		type(value) == 'string',
+		"invalid argument #" .. index .. " to '" .. name .. "' (string expected, got " .. type(value) .. ")",
+		2
+	)
+end
+
+local function tail_of(err)
+	return string.sub(tostring(err), -29)
+end
+
+isscriptable = function(instance, property)
+	check_instance_argument('isscriptable', instance, 1)
+	check_property_argument('isscriptable', property, 2)
+
+	local ok, err = pcall(function()
+		return game.GetPropertyChangedSignal(instance, property)
+	end)
+	if ok then
+		return true
+	end
+
+	local tail = tail_of(err)
+	return tail ~= NOT_SCRIPTABLE and tail ~= NOT_A_PROPERTY
+end
+
 -- cache
 
 local invalidated = setmetatable({}, {__mode = 'k'})
