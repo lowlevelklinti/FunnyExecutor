@@ -3,7 +3,7 @@
 > A lightweight and simple Roblox executor.
 
 ## 📸 Showcase
-<img width="959" height="539" alt="Image" src="https://github.com/user-attachments/assets/9610b641-1f22-46b1-8b81-fe42cea040de" />
+<img width="1198" height="613" alt="Image" src="https://github.com/user-attachments/assets/a3e36c34-c2b8-41b5-8e49-906888fb8866" />
 
 ---
 

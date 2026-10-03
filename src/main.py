@@ -9,12 +9,14 @@ from design import Ui_MainWindow, Icons, svgIcon, navIcon
 
 from PySide6.QtCore import QTimer, Qt, QThread, QObject, Signal, Slot, QEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog, QSizeGrip, QTreeWidgetItem
-from extras import CodeEditor, MessageBox
+from extras import CodeEditor, MessageBox, RpcManager
 
 import FAPI
 
 navDim = "#8a8a8a"
 navActive = "#e6e6e6"
+
+CLIENT_ID = "1553410003417960469"
 
 class RobloxWorker(QObject):
     statusChanged = Signal(str)
@@ -101,13 +103,12 @@ class RobloxWorker(QObject):
         try:
             if self.executor.injected:
                 return
-            dm = self.sdk.datamodel
-            if not dm or dm.name != 'Ugc' or not dm.address:
+            dm = self.executor._liveDataModel()
+            if not dm or not dm.address:
                 return
             if dm.address in self.executor._handledDms:
                 return
-            players = dm.findFirstChild('Players')
-            if not players or not players.getChildren():
+            if not self.executor.clientReady(dm):
                 return
         except:
             return
@@ -167,6 +168,10 @@ class Window(QMainWindow, Ui_MainWindow):
         self.setupUi(self)
 
         self._tabNumber = 0
+        self._lastStatus = None
+        self._lastNavState = None
+        self._tabContents = []
+        self._currentTabIndex = -1
         self.sidebarVisible = True
 
         self.statusLabel.setStyleSheet("color: rgb(200,50,50);")
@@ -177,6 +182,7 @@ class Window(QMainWindow, Ui_MainWindow):
         self.iconRail.installEventFilter(self)
         self.breadcrumb.installEventFilter(self)
         self.tabStrip.installEventFilter(self)
+        self.topBar.installEventFilter(self)
 
         self._thread = QThread(self)
         self._worker = RobloxWorker()
@@ -225,6 +231,7 @@ class Window(QMainWindow, Ui_MainWindow):
         for act in (self.actionExecute, self.actionInject, self.actionNewTab,
                     self.actionSaveTabs, self.actionImport, self.actionExport,
                     self.actionClearTabs, self.actionExitAltF4):
+            act.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
             self.addAction(act)
 
         self.tabBar.tabCloseRequested.connect(self.closeTab)
@@ -235,19 +242,36 @@ class Window(QMainWindow, Ui_MainWindow):
 
         self.applyNavState()
 
+        self._editor = CodeEditor()
+        self.editorStack.addWidget(self._editor)
+
         self._loadTabs()
-        self.attachCurrentEditor()
 
         self.onTop()
 
         self._thread.start()
+
+        self._rpcManager = RpcManager(CLIENT_ID, pollInterval=5.0)
+        self._rpcManager.setExecutor(self._worker)
+
+        discord_ok = self._rpcManager.discordPresent()
+        settings = self._loadSettings()
+        rpc_enabled = bool(settings.get('rpcEnabled', False)) and discord_ok
+        self.rpcSwitch.setEnabled(discord_ok)
+        self.rpcSwitch.toggled.connect(self._onRpcToggled)
+        self.rpcSwitch.setChecked(rpc_enabled)
+        if discord_ok:
+            self.rpcSwitch.setToolTip("Show what you're doing on Discord")
+
+        self._rpcManager.setEnabled(rpc_enabled)
+        self._rpcManager.start()
 
         self._autosaveTimer = QTimer(self)
         self._autosaveTimer.timeout.connect(self._saveTabs)
         self._autosaveTimer.start(10000)
 
     def eventFilter(self, obj, event):
-        if obj in (self.iconRail, self.breadcrumb, self.tabStrip) and event.type() == QEvent.Type.MouseButtonPress:
+        if obj in (self.iconRail, self.breadcrumb, self.tabStrip, self.topBar) and event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 handle = self.windowHandle()
                 if handle is not None:
@@ -288,6 +312,10 @@ class Window(QMainWindow, Ui_MainWindow):
 
     def applyNavState(self):
         showingSettings = self.mainStack.currentWidget() is self.settingsPage
+        navState = (showingSettings, self.sidebarVisible)
+        if navState == self._lastNavState:
+            return
+        self._lastNavState = navState
         self.setNavIcon(self.editorNavBtn, Icons.editorTab, not showingSettings)
         self.setNavIcon(self.filesNavBtn, Icons.folder, self.sidebarVisible)
         self.setNavIcon(self.settingsNavBtn, Icons.settingsTab, showingSettings)
@@ -342,6 +370,9 @@ class Window(QMainWindow, Ui_MainWindow):
 
     @Slot(str)
     def onStatusChanged(self, state):
+        if state == self._lastStatus:
+            return
+        self._lastStatus = state
         if state == 'injected':
             self.statusLabel.setStyleSheet("color: rgb(50,200,50);")
         elif state == 'queued':
@@ -360,31 +391,34 @@ class Window(QMainWindow, Ui_MainWindow):
         self.injectRequested.emit()
 
     def onExecute(self):
-        editor = self._getCurrentEditor()
-        if editor is None:
+        if self._currentTabIndex < 0:
             return
-        self.executeRequested.emit(editor.toPlainText())
+        self.executeRequested.emit(self._editor.toPlainText())
 
     def onNewTab(self):
         index = self._addTab()
         self.tabBar.setCurrentIndex(index)
 
+    def _syncCurrentContent(self):
+        if 0 <= self._currentTabIndex < len(self._tabContents):
+            self._tabContents[self._currentTabIndex] = self._editor.toPlainText()
+
     def onTabChanged(self, index):
         if index < 0:
             return
-        self.editorStack.setCurrentIndex(index)
-        editor = self.editorStack.widget(index)
-        if editor is not None:
-            editor.attachHighlighter()
+        self._syncCurrentContent()
+        self._currentTabIndex = index
+        if 0 <= index < len(self._tabContents):
+            self._editor.setPlainText(self._tabContents[index])
+            self._editor.refresh()
+            self._editor.setFocus()
         self._updateBreadcrumb()
 
     def _onTabMoved(self, frm, to):
-        widget = self.editorStack.widget(frm)
-        if widget is None:
-            return
-        self.editorStack.removeWidget(widget)
-        self.editorStack.insertWidget(to, widget)
-        self.editorStack.setCurrentIndex(self.tabBar.currentIndex())
+        self._syncCurrentContent()
+        item = self._tabContents.pop(frm)
+        self._tabContents.insert(to, item)
+        self._currentTabIndex = self.tabBar.currentIndex()
 
     def _updateBreadcrumb(self):
         index = self.tabBar.currentIndex()
@@ -393,11 +427,6 @@ class Window(QMainWindow, Ui_MainWindow):
             self.pathLabel.setText(u"Funny Executor  \u203a  " + name)
         else:
             self.pathLabel.setText(u"Funny Executor")
-
-    def attachCurrentEditor(self):
-        editor = self.editorStack.currentWidget()
-        if editor is not None:
-            editor.attachHighlighter()
 
     def onTop(self):
         flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
@@ -413,11 +442,9 @@ class Window(QMainWindow, Ui_MainWindow):
             "",
             "Luau Script (*.luau; *.lua);;All Files (*)"
         )
-        editor = self._getCurrentEditor()
-
-        if filePath and editor:
+        if filePath and self._currentTabIndex >= 0:
             with open(filePath, 'r', encoding='utf-8') as f:
-                editor.setPlainText(f.read())
+                self._editor.setPlainText(f.read())
 
     def exportLuau(self):
         filePath, _ = QFileDialog.getSaveFileName(
@@ -426,18 +453,16 @@ class Window(QMainWindow, Ui_MainWindow):
             "",
             "Luau source files (*.lua; *.luau);;All Files (*)"
         )
-        editor = self._getCurrentEditor()
-
-        if filePath and editor:
+        if filePath and self._currentTabIndex >= 0:
             with open(filePath, 'w', encoding='utf-8') as f:
-                f.write(editor.toPlainText())
+                f.write(self._editor.toPlainText())
             self._refreshTree()
 
     def closeTab(self, index):
-        widget = self.editorStack.widget(index)
-        if widget is not None:
-            self.editorStack.removeWidget(widget)
-            widget.deleteLater()
+        self._syncCurrentContent()
+        if 0 <= index < len(self._tabContents):
+            self._tabContents.pop(index)
+        self._currentTabIndex = -1
         self.tabBar.removeTab(index)
         if self.tabBar.count() == 0:
             self._tabNumber = 1
@@ -445,19 +470,41 @@ class Window(QMainWindow, Ui_MainWindow):
             self.tabBar.setCurrentIndex(newIndex)
 
     def _shutdownWorker(self):
+        if hasattr(self, '_rpcManager'):
+            self._rpcManager.stop()
         self._worker.stop()
         self._thread.quit()
         self._thread.wait(3000)
 
+    def _onRpcToggled(self, checked):
+        if hasattr(self, '_rpcManager'):
+            self._rpcManager.setEnabled(self.rpcSwitch.isChecked())
+            self._saveSetting('rpcEnabled', self.rpcSwitch.isChecked())
+
+    def _loadSettings(self):
+        try:
+            with open(appData + '\\settings.json', 'r', encoding='utf-8') as f:
+                return json.loads(f.read())
+        except Exception:
+            return {}
+
+    def _saveSetting(self, key, value):
+        data = self._loadSettings()
+        data[key] = value
+        try:
+            with open(appData + '\\settings.json', 'w', encoding='utf-8') as f:
+                f.write(json.dumps(data))
+        except Exception:
+            pass
+
     def _saveTabs(self):
+        self._syncCurrentContent()
         data = [self._tabNumber]
         for i in range(self.tabBar.count()):
-            editor = self.editorStack.widget(i)
             data.append([
                 self.tabBar.tabText(i),
-                editor.toPlainText() if editor is not None else ""
+                self._tabContents[i] if i < len(self._tabContents) else ""
             ])
-
         with open(appData+'\\tabs.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps(data))
 
@@ -467,10 +514,8 @@ class Window(QMainWindow, Ui_MainWindow):
                 'Are you sure you want to clear all of your tabs? This action cannot be undone.',
                 MessageBox.StandardButton.Yes | MessageBox.StandardButton.No
         ) == MessageBox.StandardButton.Yes:
-            for i in reversed(range(self.editorStack.count())):
-                widget = self.editorStack.widget(i)
-                self.editorStack.removeWidget(widget)
-                widget.deleteLater()
+            self._tabContents.clear()
+            self._currentTabIndex = -1
             while self.tabBar.count() > 0:
                 self.tabBar.removeTab(0)
             self._tabNumber = 1
@@ -478,13 +523,13 @@ class Window(QMainWindow, Ui_MainWindow):
             self.tabBar.setCurrentIndex(newIndex)
 
     def _addTab(self, name=None, content=None):
-        editor = CodeEditor(content)
-
+        from extras import defaultScript
+        if content is None:
+            content = defaultScript
         if name is None:
             self._tabNumber += 1
             name = f'Script #{self._tabNumber}'
-
-        self.editorStack.addWidget(editor)
+        self._tabContents.append(content)
         return self.tabBar.addTab(name)
 
     def _loadTabs(self):
@@ -515,7 +560,9 @@ class Window(QMainWindow, Ui_MainWindow):
             event.ignore()
 
     def _getCurrentEditor(self):
-        return self.editorStack.currentWidget()
+        if self._currentTabIndex >= 0:
+            return self._editor
+        return None
 
 appData = os.environ['APPDATA']+'\\FunnyExecutor'
 scriptsDir = appData+'\\scripts'

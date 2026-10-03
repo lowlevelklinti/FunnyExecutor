@@ -14,6 +14,17 @@ local http = game.HttpService
 local lastValue = upd.Value
 local bridgeServer = 'http://127.0.0.1:9475'
 
+local native_loadstring
+do
+	local candidate = loadstring
+	if type(candidate) == 'function' then
+		local ok, origin = pcall(debug.info, candidate, 's')
+		if ok and origin == '[C]' then
+			native_loadstring = candidate
+		end
+	end
+end
+
 if __funny_blocked_methods then
 	local function blockMethods(className, methods)
 		for _, method in ipairs(methods) do
@@ -385,22 +396,271 @@ end
 
 -- unc functions
 
+local host_env = getfenv()
+if type(host_env) ~= 'table' then
+	host_env = _G
+	if type(host_env) ~= 'table' then
+		host_env = {}
+	end
+end
+
 local genv_table = {}
+
+local chunk_env = {}
+setmetatable(chunk_env, {
+	__index = function(_, key)
+		local value = rawget(genv_table, key)
+		if value ~= nil then
+			return value
+		end
+		return host_env[key]
+	end,
+})
 
 getgenv = function()
 	return genv_table
 end
 
-do
-	local ok = pcall(function()
-		local env = getfenv()
-		local meta = getmetatable(env)
-		if type(meta) ~= 'table' then
-			meta = {}
+local senv_debug_info = debug and debug.info
+local senv_closure_info = rawget(host_env, '__funny_closure_info')
+
+local senv_scripts = setmetatable({}, { __mode = 'k' })
+local senv_reals = setmetatable({}, { __mode = 'k' })
+
+-- filled in with the game environment table once that has been built
+local senv_fallback
+
+local function senv_env(func)
+	local okenv, env = pcall(getfenv, func)
+	if okenv and type(env) == 'table' then
+		return env
+	end
+	return nil
+end
+
+local function senv_frames(first, last)
+	local frames = {}
+
+	for depth = first, last do
+		local ok, func = pcall(senv_debug_info, depth, 'f')
+		if not ok or func == nil then
+			break
 		end
-		meta.__index = genv_table
-		setmetatable(env, meta)
+
+		local oksrc, source = pcall(senv_debug_info, depth, 's')
+		if not oksrc or source == '[C]' then
+			continue
+		end
+
+		local env = senv_env(func)
+		if env ~= nil then
+			frames[#frames + 1] = { func, env }
+		end
+	end
+
+	return frames
+end
+
+local function senv_belongs(env, script)
+	return rawget(env, 'script') == script
+end
+
+local function senv_find(script)
+	local cached = senv_scripts[script]
+	if cached ~= nil and senv_env(cached) ~= nil then
+		return cached
+	end
+
+	local loaded, func = pcall(senv_debug_info, script, 'f')
+	if loaded and type(func) == 'function' then
+		local env = senv_env(func)
+		if env ~= nil and senv_belongs(env, script) then
+			senv_scripts[script] = func
+			senv_reals[script] = env
+			return func
+		end
+	end
+
+	if type(senv_closure_info) == 'table' then
+		for candidate, entry in pairs(senv_closure_info) do
+			if type(entry) == 'table' and type(entry.env) == 'table' and senv_belongs(entry.env, script) then
+				senv_scripts[script] = candidate
+				senv_reals[script] = entry.env
+				return candidate
+			end
+		end
+	end
+
+	for _, frame in ipairs(senv_frames(2, 66)) do
+		if senv_belongs(frame[2], script) then
+			senv_scripts[script] = frame[1]
+			senv_reals[script] = frame[2]
+			return frame[1]
+		end
+	end
+
+	for _, object in ipairs(getgc()) do
+		if type(object) == 'function' then
+			local env = senv_env(object)
+			if env ~= nil and senv_belongs(env, script) then
+				senv_scripts[script] = object
+				senv_reals[script] = env
+				return object
+			end
+		end
+	end
+
+	return nil
+end
+
+local senv_stand_ins = setmetatable({}, { __mode = 'k' })
+local senv_writes = setmetatable({}, { __mode = 'k' })
+
+local function senv_stand_in_iteration(proxy)
+	local written = senv_writes[proxy]
+	local fallback = senv_fallback
+	local inWrites, key = true, nil
+
+	return function()
+		while inWrites do
+			local found, value = next(written, key)
+
+			if found == nil then
+				inWrites = false
+				key = nil
+				break
+			end
+
+			key = found
+			return found, value
+		end
+
+		if fallback == nil then
+			return nil
+		end
+
+		local found, value = next(fallback, key)
+		if found == nil then
+			return nil
+		end
+
+		key = found
+		return found, value
+	end
+end
+
+local function senv_stand_in(script)
+	local proxy = senv_stand_ins[script]
+	if proxy ~= nil then
+		return proxy
+	end
+
+	proxy = { script = script }
+	senv_writes[proxy] = {}
+
+	setmetatable(proxy, {
+		__index = function(_, key)
+			local real = senv_reals[script]
+			if real ~= nil then
+				local value = real[key]
+				if value ~= nil then
+					return value
+				end
+			end
+
+			local value = senv_writes[proxy][key]
+			if value ~= nil then
+				return value
+			end
+
+			return senv_fallback ~= nil and senv_fallback[key] or nil
+		end,
+
+		__newindex = function(_, key, value)
+			senv_writes[proxy][key] = value
+		end,
+
+		__pairs = function()
+			return senv_stand_in_iteration(proxy)
+		end,
+	})
+
+	senv_stand_ins[script] = proxy
+
+	return proxy
+end
+
+local function senv_adopt(script, env)
+	local proxy = senv_stand_ins[script]
+	if proxy == nil then
+		return env
+	end
+
+	for key, value in next, senv_writes[proxy] do
+		if rawget(env, key) == nil then
+			pcall(function()
+				env[key] = value
+			end)
+		end
+	end
+
+	senv_reals[script] = env
+
+	return env
+end
+
+getsenv = function(script)
+	if script == nil then
+		local frame = senv_frames(2, 34)[1]
+
+		if frame ~= nil then
+			-- a chunk this executor loaded keeps its environment on the registry
+			if type(senv_closure_info) == 'table' then
+				local entry = senv_closure_info[frame[1]]
+				if type(entry) == 'table' and type(entry.env) == 'table' then
+					return entry.env
+				end
+			end
+
+			return frame[2]
+		end
+
+		error('getsenv: unable to resolve the calling script environment', 2)
+	end
+
+	local invalid = 'getsenv: Script, LocalScript or ModuleScript expected, got '
+
+	if typeof(script) ~= 'Instance' then
+		error(invalid .. type(script), 2)
+	end
+
+	local okclass, isscript = pcall(function()
+		return script:IsA('BaseScript') or script:IsA('ModuleScript')
 	end)
+	if not okclass or not isscript then
+		error(invalid .. typeof(script), 2)
+	end
+
+	local func = senv_find(script)
+	if func ~= nil then
+		local env = senv_env(func)
+		if env ~= nil then
+			return senv_adopt(script, env)
+		end
+	end
+
+	return senv_stand_in(script)
+end
+
+getcallingscript = function()
+	for _, frame in ipairs(senv_frames(2, 66)) do
+		local current = rawget(frame[2], 'script')
+		if current ~= nil then
+			return current
+		end
+	end
+
+	return nil
 end
 
 local renv_table = {
@@ -438,6 +698,8 @@ local renv_table = {
 getrenv = function()
 	return renv_table
 end
+
+senv_fallback = renv_table
 
 local AES = {}
 do
@@ -1015,19 +1277,82 @@ debug.info = function(f, what)
 	return real_debug_info(f, what)
 end
 
-loadstring = function(source, chunkname)
+local function compile_source(source, chunkname)
+	local response = send_method('compile', base64encode(source), base64encode(chunkname or ''))
+
+	if type(response) ~= 'string' or response == '' then
+		return nil, 'FunnyExecutor -- loadstring: compiler unavailable'
+	end
+
+	if response:sub(1, 4) == 'fail' then
+		local message = response:sub(5):gsub('^%s+', '')
+		return nil, 'FunnyExecutor -- loadstring: ' .. (message ~= '' and message or 'compile error')
+	end
+
+	local ok, bytecode = pcall(base64decode, response)
+	if not ok or type(bytecode) ~= 'string' or #bytecode == 0 then
+		return nil, 'FunnyExecutor -- loadstring: malformed bytecode from compiler'
+	end
+
+	return bytecode
+end
+
+local function load_vm_bytecode(bytecode, env)
+	local loader = load_bytecode
+	if type(loader) ~= 'function' then
+		return nil, 'FunnyExecutor -- loadstring: load_bytecode is unavailable'
+	end
+
+	local ok, func, err = pcall(loader, bytecode, env)
+	if not ok then
+		return nil, 'FunnyExecutor -- loadstring: ' .. tostring(func)
+	end
+	if type(func) ~= 'function' then
+		return nil, 'FunnyExecutor -- loadstring: ' .. tostring(err or 'failed to load bytecode')
+	end
+
+	return func
+end
+
+loadstring = function(source, chunkname, env)
+	if type(source) ~= 'string' then
+		return nil, "FunnyExecutor -- loadstring: string expected, got " .. type(source)
+	end
+
+	if chunkname ~= nil and type(chunkname) ~= 'string' and type(chunkname) ~= 'number' then
+		return nil, "FunnyExecutor -- loadstring: chunkname expected to be a string, got " .. type(chunkname)
+	end
+
 	if chunkname then
 		chunkname = tostring(chunkname):gsub('^[@=]', '')
 	end
 
-	local response = send_method('compile', base64encode(source), base64encode(chunkname or ''))
-	if not response or response:sub(1, 4) == 'fail' then
-		return nil, 'FunnyExecutor -- loadstring error: ' .. tostring(response)
+	env = type(env) == 'table' and env or chunk_env
+
+	local bytecode, failure = compile_source(source, chunkname)
+	local func = bytecode and load_vm_bytecode(bytecode, env) or nil
+
+	if not func and native_loadstring then
+		local ok, res, err = pcall(native_loadstring, source, chunkname and ('=' .. chunkname) or nil)
+
+		if ok and type(res) == 'function' then
+			func = res
+			pcall(setfenv, func, env)
+		elseif ok then
+			failure = err or res
+		else
+			failure = res
+		end
 	end
-	local func = load_bytecode(base64decode(response), getfenv())
+
+	if type(func) ~= 'function' then
+		return nil, tostring(failure or 'FunnyExecutor -- loadstring: compile error')
+	end
+
 	if chunkname and chunkname ~= '' then
 		chunk_sources[func] = chunkname
 	end
+
 	return func
 end
 
@@ -1302,7 +1627,7 @@ end
 -- identifyexecutor
 
 identifyexecutor = function()
-	return 'Funny Executor', 'v0.565'
+	return 'Funny Executor', 'v0.566'
 end
 
 getexecutorname = function()
@@ -2413,10 +2738,9 @@ local function make_readonly(tbl)
 	end
 	readonly_inner[tbl] = inner
 
-	for k in pairs(tbl) do
-		tbl[k] = nil
-	end
-
+	-- keep the entries in place, Roblox's own table.freeze lets pairs/ipairs
+	-- keep working and emptying the table breaks every CoreGui module that
+	-- iterates over something it froze
 	setmetatable(tbl, readonly_meta)
 	return tbl
 end
@@ -2458,6 +2782,46 @@ setreadonly = function(tbl, readonly)
 		setmetatable(tbl, nil)
 	end
 	return tbl
+end
+
+-- instance properties
+
+local NOT_SCRIPTABLE = "is not a scriptable property."
+local NOT_A_PROPERTY = "is not a valid property name."
+
+local function check_instance_argument(name, value, index)
+	assert(
+		typeof(value) == 'Instance',
+		"invalid argument #" .. index .. " to '" .. name .. "' (Instance expected, got " .. typeof(value) .. ")",
+		2
+	)
+end
+
+local function check_property_argument(name, value, index)
+	assert(
+		type(value) == 'string',
+		"invalid argument #" .. index .. " to '" .. name .. "' (string expected, got " .. type(value) .. ")",
+		2
+	)
+end
+
+local function tail_of(err)
+	return string.sub(tostring(err), -29)
+end
+
+isscriptable = function(instance, property)
+	check_instance_argument('isscriptable', instance, 1)
+	check_property_argument('isscriptable', property, 2)
+
+	local ok, err = pcall(function()
+		return game.GetPropertyChangedSignal(instance, property)
+	end)
+	if ok then
+		return true
+	end
+
+	local tail = tail_of(err)
+	return tail ~= NOT_SCRIPTABLE and tail ~= NOT_A_PROPERTY
 end
 
 -- cache
@@ -2569,7 +2933,7 @@ local function load_saveinstance()
 	end)
 	if not source then
 		pcall(function()
-			source = game:HttpGet(synSaveInstanceUrl, true)
+			source = httpget(synSaveInstanceUrl)
 		end)
 	end
 	if not source or #source == 0 then
@@ -2612,19 +2976,111 @@ saveinstance = function(object, options) -- docs: https://luau.github.io/Univers
 end
 savegame = saveinstance
 
-request = function(options)
-	assert(type(options) == 'table' and type(options.Url) == 'string', "invalid argument #1 to 'request' (table with Url expected, got " .. type(options) .. ')', 2)
+local MAX_REDIRECTS = 8
+local REQUEST_TIMEOUT = 30
+local DEFAULT_USER_AGENT = 'Roblox/WinInet'
 
+local function copy_headers(source)
 	local headers = {}
-	if type(options.Headers) == 'table' then
-		for k, v in options.Headers do
-			headers[k] = v
+	if type(source) == 'table' then
+		for key, value in pairs(source) do
+			if type(key) == 'string' then
+				headers[key] = tostring(value)
+			end
+		end
+	end
+	return headers
+end
+
+local function response_header(result, name)
+	local headers = type(result) == 'table' and result.Headers or nil
+	if type(headers) ~= 'table' then
+		return nil
+	end
+
+	local wanted = string.lower(name)
+	for _, header in ipairs(headers) do
+		if type(header) == 'table' and type(header.Name) == 'string' and string.lower(header.Name) == wanted then
+			return header.Value
 		end
 	end
 
+	return nil
+end
+
+local function resolve_redirect(url, location)
+	if type(url) ~= 'string' or type(location) ~= 'string' or location == '' then
+		return nil
+	end
+
+	if location:lower():match('^https?://') then
+		return location
+	end
+
+	local authority = url:match('^(https?://[^/%?#]+)')
+	if not authority then
+		return nil
+	end
+
+	if location:sub(1, 1) == '/' then
+		return authority .. location
+	end
+
+	local path = url:match('^https?://[^/]+(/.*)$') or '/'
+	return authority .. (path:match('^(.*/)[^/]*$') or '/') .. location
+end
+
+local function raw_request(options, redirectsLeft)
+	local result = nil
+
+	local sent = pcall(function()
+		http:RequestInternal({
+			Url = options.Url,
+			Method = options.Method or "GET",
+			Headers = options.Headers,
+			Body = options.Body
+		}):Start(function(s, b)
+			-- a failed request still has to hand something back, otherwise the wait
+			-- below would never be released
+			result = type(b) == 'table' and b or { Body = '', StatusCode = 0 }
+			result['Success'] = s
+		end)
+	end)
+
+	if sent then
+		local deadline = os.time() + REQUEST_TIMEOUT
+		while result == nil and os.time() < deadline do
+			task.wait()
+		end
+	end
+
+	if not sent or result == nil then
+		return nil
+	end
+
+	local status = tonumber(result.StatusCode) or 0
+	if status >= 300 and status < 400 and redirectsLeft > 0 then
+		local location = resolve_redirect(options.Url, response_header(result, 'Location'))
+		if location then
+			return raw_request({
+				Url = location,
+				Method = 'GET',
+				Headers = options.Headers,
+			}, redirectsLeft - 1)
+		end
+	end
+
+	return result
+end
+
+request = function(options)
+	assert(type(options) == 'table' and type(options.Url) == 'string', "invalid argument #1 to 'request' (table with Url expected, got " .. type(options) .. ')', 2)
+
+	local headers = copy_headers(options.Headers)
+
 	if type(options.Cookies) == 'table' then
 		local parts = {}
-		for k, v in options.Cookies do
+		for k, v in pairs(options.Cookies) do
 			parts[#parts + 1] = tostring(k) .. '=' .. tostring(v)
 		end
 		if #parts > 0 then
@@ -2634,21 +3090,14 @@ request = function(options)
 		end
 	end
 
-	local result = nil
-
-	http:RequestInternal({
+	local result = raw_request({
 		Url = options.Url,
 		Method = options.Method or "GET",
 		Headers = headers,
 		Body = options.Body
-	}):Start(function(s,b)
-		result = b
-		result['Success'] = s
-	end)
+	}, MAX_REDIRECTS)
 
-	repeat task.wait() until result
-
-	if not result or not result.Success then
+	if not result then
 		warn('FunnyExecutor -- request error')
 		return nil
 	end
@@ -2656,9 +3105,39 @@ request = function(options)
 	return result
 end
 
+local function assert_http_url(url, caller)
+	if type(url) ~= 'string' or not url:lower():match('^https?://') then
+		error("FunnyExecutor -- " .. caller .. ": invalid protocol (expected 'http://' or 'https://')", 3)
+	end
+end
+
+httpget = function(url, headers)
+	assert_http_url(url, 'httpget')
+
+	local request_headers = copy_headers(headers)
+	if not request_headers['User-Agent'] and not request_headers['user-agent'] then
+		request_headers['User-Agent'] = DEFAULT_USER_AGENT
+	end
+
+	local result = raw_request({
+		Url = url,
+		Method = 'GET',
+		Headers = request_headers
+	}, MAX_REDIRECTS)
+
+	if not result or result.Success == false or type(result.Body) ~= 'string' then
+		error('FunnyExecutor -- httpget: request failed: ' .. tostring(url), 2)
+	end
+
+	return result.Body
+end
+
 http_request = request
+http_get = httpget
+HttpGet = httpget
 env.http = {request = request}
 syn = {request = request}
+
 
 Signal = {}
 
@@ -2931,6 +3410,14 @@ end)
 
 pcall(flush_teleport_queue)
 pcall(saveinstance_warm)
+pcall(function()
+	for senv_key, senv_value in pairs(host_env) do
+		if type(senv_key) == 'string' and senv_key ~= '_G' and senv_key:sub(1, 7) ~= '__funny' then
+			rawset(genv_table, senv_key, senv_value)
+		end
+	end
+end)
+rawset(genv_table, '_G', genv_table)
 
 task.spawn(function()
 	while task.wait() do
@@ -2940,7 +3427,7 @@ task.spawn(function()
 				local data = requestData()
 				if data then
 					local ok, err = pcall(function()
-						load_bytecode(data, getfenv())()
+						load_bytecode(data, chunk_env)()
 					end)
 					if not ok then
 						warn('FunnyExecutor -- execution error: ' .. tostring(err))
