@@ -2738,10 +2738,9 @@ local function make_readonly(tbl)
 	end
 	readonly_inner[tbl] = inner
 
-	for k in pairs(tbl) do
-		tbl[k] = nil
-	end
-
+	-- keep the entries in place, Roblox's own table.freeze lets pairs/ipairs
+	-- keep working and emptying the table breaks every CoreGui module that
+	-- iterates over something it froze
 	setmetatable(tbl, readonly_meta)
 	return tbl
 end

@@ -103,13 +103,12 @@ class RobloxWorker(QObject):
         try:
             if self.executor.injected:
                 return
-            dm = self.sdk.datamodel
-            if not dm or dm.name != 'Ugc' or not dm.address:
+            dm = self.executor._liveDataModel()
+            if not dm or not dm.address:
                 return
             if dm.address in self.executor._handledDms:
                 return
-            players = dm.findFirstChild('Players')
-            if not players or not players.getChildren():
+            if not self.executor.clientReady(dm):
                 return
         except:
             return

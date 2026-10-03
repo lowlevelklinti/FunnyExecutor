@@ -11,6 +11,7 @@ class CustomOffsets:
     bytecodeSize = 0x28
     bytecodePtr = 0x18
     localBytecode = 0x180
+    moduleState = 0x160 # offset by theholytorch, thanks!
 
 class SdkError(Exception): pass
 

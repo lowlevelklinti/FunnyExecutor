@@ -998,6 +998,11 @@ game_state = {}
 def isDmConfirmed(dmAddr):
     return dmAddr in _confirmedDms
 
+def forgetDm(dmAddr):
+    # datamodel addresses get recycled after a rejoin/teleport, so a stale
+    # confirmation must never make us think a brand new place is injected
+    _confirmedDms.discard(dmAddr)
+
 def setSdk(sdk):
     global _sdk
     _sdk = sdk

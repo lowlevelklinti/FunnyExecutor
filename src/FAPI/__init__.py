@@ -44,6 +44,15 @@ def forceForeground(hwnd):
 class ExecutionError(Exception): pass
 
 class Executor:
+    # Roblox keeps building CoreGui (RobloxGui.Topbar, PlayerList, InspectAndBuy, ...)
+    # for the first seconds of a DataModel. Hijacking PlayerListManager while that
+    # is still happening makes RobloxGui's own modules load with a nil module value
+    # ("attempt to index nil with 'Event'" in TopBar/GamepadConnector), the top bar
+    # never gets built and F9 fills up with errors. So never touch anything until
+    # the client UI is actually up and the DataModel has settled.
+    MIN_DM_AGE = 3.0
+    READY_TIMEOUT = 30.0
+
     def __init__(self, rbx: sdk.Roblox = None):
         if not robloxOpen():
             raise ExecutionError('Roblox is not open')
@@ -54,18 +63,70 @@ class Executor:
         self._injecting = False
         self._handledDms = set()
         self._updAddr = None
+        self._dmAddr = None
+        self._dmSince = 0.0
+
+    def _liveDataModel(self):
+        """Current DataModel, with per-place state reset whenever it changes.
+
+        DataModel addresses are recycled by Roblox after a rejoin/teleport, so
+        everything keyed by address has to be dropped when the address changes.
+        """
+        dm = self.sdk.datamodel
+        if not dm or dm.name != 'Ugc' or not dm.address:
+            return None
+
+        if dm.address != self._dmAddr:
+            self._dmAddr = dm.address
+            self._dmSince = time.time()
+            self._updAddr = None
+            self._handledDms.discard(dm.address)
+            bridge.forgetDm(dm.address)
+
+        return dm
+
+    def clientReady(self, dm=None) -> bool:
+        """True once Roblox finished booting its own UI, safe to inject."""
+        try:
+            if dm is None:
+                dm = self._liveDataModel()
+            if not dm:
+                return False
+
+            age = time.time() - self._dmSince
+            if age < self.MIN_DM_AGE:
+                return False
+
+            # don't stay stuck forever on a place that never parents a PlayerGui
+            if age >= self.READY_TIMEOUT:
+                return True
+
+            players = dm.findFirstChild('Players')
+            if not players:
+                return False
+
+            # the local player's PlayerGui only gets parented to CoreGui once the
+            # client UI is up, which is a late enough signal for us
+            for player in (players.getChildren() or []):
+                gui = player.findFirstChild('PlayerGui')
+                if gui is not None and gui.parent is not None:
+                    return True
+
+            return False
+        except:
+            return False
 
     @property
     def injected(self):
         try:
-            dm = self.sdk.datamodel
-            if not dm or dm.name != "Ugc":
+            dm = self._liveDataModel()
+            if not dm:
                 return False
             if not psutil.pid_exists(self.sdk.mem.process_id):
                 return False
-            if bridge.isDmConfirmed(dm.address):
+            if dm.find('CoreGui', '_funnyexecutor') is not None:
                 return True
-            return dm.find('CoreGui', '_funnyexecutor') is not None
+            return bridge.isDmConfirmed(dm.address)
         except:
             return False
 
@@ -76,11 +137,14 @@ class Executor:
             print("Skipping injection, root folder already exists.")
             return
 
-        dm = self.sdk.datamodel
-        if not dm or dm.name != "Ugc" or not dm.address:
+        dm = self._liveDataModel()
+        if not dm:
             return
 
         if dm.address in self._handledDms:
+            return
+
+        if not self.clientReady(dm):
             return
 
         players = dm.findFirstChild('Players')
@@ -96,8 +160,8 @@ class Executor:
                 bridge.setSdk(self.sdk)
 
             rbx = self.sdk
-            game = rbx.datamodel
-            if not game:
+            game = self._liveDataModel()
+            if not game or game.address != dm.address:
                 return
 
             windowHandles = sdk.getHwnd(rbx.mem.process_handle)
@@ -119,7 +183,10 @@ class Executor:
             print('got EnableLoadModule:', hex(addr))
 
             rbx.mem.write_bool(addr, True)
-            rbx.mem.write_int(plm.address + 0x160, 0) ## offset by theholytorch, thanks!
+
+            stateAddr = plm.address + sdk.CustomOffsets.moduleState
+            prevState = rbx.mem.read_int(stateAddr)
+            rbx.mem.write_int(stateAddr, 0)
 
             print('set PlayerListManager.ModuleState to 0')
 
@@ -137,10 +204,18 @@ class Executor:
             time.sleep(0.05)
 
             pydirectinput.press('esc')
-            bridge.initReceivedEvent.wait(timeout=0.6)
-            time.sleep(0.05)
+            triggered = bridge.initReceivedEvent.wait(timeout=2.0)
+            time.sleep(0.25)
             revert()
-            pydirectinput.press('esc')
+
+            # the injected script became the cached return value of this module,
+            # put the state back so Roblox is never left with a half-required module
+            rbx.mem.write_int(stateAddr, prevState)
+
+            # only close the menu again when our keypress actually opened it,
+            # otherwise we'd leave the menu open instead
+            if triggered:
+                pydirectinput.press('esc')
             if oldForegroundHwnd and oldForegroundHwnd != hwnd:
                 forceForeground(oldForegroundHwnd)
 
@@ -163,12 +238,16 @@ class Executor:
             raise ExecutionError("You must inject before executing. Tip: add FAPI.inject() before execution")
 
         rbx = self.sdk
-        game = rbx.datamodel
+        game = self._liveDataModel()
+        if not game:
+            raise ExecutionError("Lost the current place, try injecting again")
         updAddr = self._updAddr
 
         if updAddr is None or updAddr[0] != game.address:
             coreGui: sdk.Instance = game.findFirstChild('CoreGui')
             root: sdk.Instance = coreGui.findFirstChild('_funnyexecutor') if coreGui else None
+            if root is None:
+                raise ExecutionError("Injection is gone, try injecting again")
             updateIndicator: sdk.BoolValue = root.findFirstChild('UpdateIndicator')
             updAddr = (game.address, updateIndicator.address)
             self._updAddr = updAddr
